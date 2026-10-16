@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using DeviceTelemetry.Api.Http;
 using DeviceTelemetry.Application.Common;
 using DeviceTelemetry.Application.Mobile.Queries.GetCustomerDevices;
@@ -23,7 +24,6 @@ namespace DeviceTelemetry.Api.Controllers;
 [AllowAnonymous]
 [EnableRateLimiting(TelemetryRateLimiting.MobilePolicyName)]
 [Tags("Mobile (temporarily public)")]
-[Produces("application/json")]
 public class MobileController : ControllerBase
 {
     /// <summary>Devices of a customer.</summary>
@@ -37,10 +37,11 @@ public class MobileController : ControllerBase
     /// <response code="200">The customer's devices (possibly empty).</response>
     /// <response code="404">The customer does not exist (<c>customer.not_found</c>).</response>
     [HttpGet("customers/{customerId}/devices")]
-    [ProducesResponseType<IReadOnlyList<DeviceListItemDto>>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType<IReadOnlyList<DeviceListItemDto>>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
     public async Task<IActionResult> GetCustomerDevices(
         int customerId,
         [FromServices] IQueryHandler<GetCustomerDevicesQuery, IReadOnlyList<DeviceListItemDto>> handler)
@@ -60,10 +61,11 @@ public class MobileController : ControllerBase
     /// <response code="200">The device.</response>
     /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
     [HttpGet("devices/{deviceId}")]
-    [ProducesResponseType<DeviceDetailsDto>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType<DeviceDetailsDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
     public async Task<IActionResult> GetDeviceDetails(
         int deviceId,
         [FromServices] IQueryHandler<GetDeviceDetailsQuery, DeviceDetailsDto> handler)
@@ -88,13 +90,14 @@ public class MobileController : ControllerBase
     /// <response code="400">Invalid <c>limit</c> or <c>cursor</c> (<c>pagination.invalid_limit</c>, <c>pagination.invalid_cursor</c>).</response>
     /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
     [HttpGet("devices/{deviceId}/events")]
-    [ProducesResponseType<PagedResult<DeviceEventDto>>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType<PagedResult<DeviceEventDto>>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
     public async Task<IActionResult> GetDeviceEvents(
         int deviceId,
-        [FromQuery] int? limit,
+        [FromQuery, DefaultValue(GetDeviceEventsQuery.DefaultLimit)] int? limit,
         [FromQuery] string? cursor,
         [FromServices] IQueryHandler<GetDeviceEventsQuery, PagedResult<DeviceEventDto>> handler)
     {

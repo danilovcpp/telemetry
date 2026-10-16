@@ -46,6 +46,8 @@ X-Device-Key: dtk_...
 
 ## Мобильный API (чтение)
 
+Спецификация для разработчиков мобильного приложения — [docs/mobile-api.md](docs/mobile-api.md), OpenAPI — [docs/mobile-api.openapi.json](docs/mobile-api.openapi.json). Ниже — краткая сводка.
+
 > **Временно публичный (MVP).** Endpoint-ы `/api/mobile/*` работают без аутентификации и явно помечены `[AllowAnonymous]`. `customerId` и `deviceId` в URL не доказывают права доступа: любой, кто достучится до сервиса, может прочитать устройства и историю любого клиента, перебирая числовые id. Перебор только замедляет лимит запросов с одного IP (`RateLimiting:Mobile`, по умолчанию 120 в минуту). До публичного production-запуска нужны аутентификация пользователя и проверка, что запрошенный клиент или устройство принадлежат ему.
 
 Все id здесь внутренние: `customerId` = `Customer.Id`, `deviceId` = `Device.Id` (поле `id` из списка устройств), а не `DeviceCode`. Ошибки — в том же формате Problem Details с полем `code`. Нечисловой id в пути даёт 400. При `ASPNETCORE_ENVIRONMENT=Development` полное описание лежит в OpenAPI: `GET /openapi/v1.json`, тег «Mobile (temporarily public)».

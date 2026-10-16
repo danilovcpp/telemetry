@@ -1,5 +1,8 @@
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.Api.Http;
@@ -52,11 +55,31 @@ public static class TelemetryRateLimiting
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = WriteRejectionAsync;
             options.AddPolicy(PolicyName, PerIp<TelemetryRateLimitOptions>);
             options.AddPolicy(MobilePolicyName, PerIp<MobileRateLimitOptions>);
         });
 
         return services;
+    }
+
+    /// <summary>429 with <c>Retry-After</c> (seconds until the window resets) and the usual problem body with a <c>code</c>.</summary>
+    private static async ValueTask WriteRejectionAsync(OnRejectedContext context, CancellationToken ct)
+    {
+        var response = context.HttpContext.Response;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+
+        await context.HttpContext.RequestServices.GetRequiredService<IProblemDetailsService>().TryWriteAsync(new ProblemDetailsContext
+        {
+            HttpContext = context.HttpContext,
+            ProblemDetails = new ProblemDetails
+            {
+                Status = StatusCodes.Status429TooManyRequests,
+                Detail = "Too many requests from this address. Retry after the number of seconds in the Retry-After header.",
+                Extensions = { ["code"] = "rate_limit.exceeded" },
+            },
+        });
     }
 
     private static RateLimitPartition<string> PerIp<TOptions>(HttpContext httpContext)

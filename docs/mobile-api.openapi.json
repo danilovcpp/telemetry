@@ -1,0 +1,450 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "DeviceTelemetry Mobile API",
+    "version": "1.0.0",
+    "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`."
+  },
+  "servers": [
+    {
+      "url": "{baseUrl}",
+      "description": "Service base URL, e.g. the Staging VPS.",
+      "variables": {
+        "baseUrl": {
+          "default": "http://localhost:8080"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/api/mobile/customers/{customerId}/devices": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Devices of a customer.",
+        "description": "All devices of the customer sorted by name, then id. Not paginated: devices are provisioned manually and their\r\nnumber per customer is small. An existing customer without devices yields an empty array.\r\n\r\n    GET /api/mobile/customers/42/devices",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "Internal customer id.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The customer's devices (possibly empty).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceListItemDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The customer does not exist (`customer.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/devices/{deviceId}": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Device card.",
+        "description": "`lastEventAtUtc` / `lastStatusCode` come from the most recent event by device time (`occurredAtUtc`):\r\nthe last known status, not a guaranteed current state. Both are `null` when the device has no events.\r\n\r\n    GET /api/mobile/devices/15",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id (`id` from the device list), not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The device.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDetailsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/devices/{deviceId}/events": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Event history of a device, newest first.",
+        "description": "Cursor pagination, ordered by `occurredAtUtc` descending, then `id` descending. Request the first page\r\nwithout `cursor`; while `hasMore` is true, pass the returned `nextCursor` unchanged to get the next\r\npage. Events with equal timestamps are never skipped or repeated. `payload` is the JSON object the device sent.\r\n\r\n    GET /api/mobile/devices/15/events?limit=20\r\n    GET /api/mobile/devices/15/events?limit=20&amp;cursor=AAjc...",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1–100; default 20.",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque `nextCursor` from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events (possibly empty).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfDeviceEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `limit` or `cursor` (`pagination.invalid_limit`, `pagination.invalid_cursor`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DeviceDetailsDto": {
+        "required": [
+          "id",
+          "deviceCode",
+          "name",
+          "customerId",
+          "lastEventAtUtc",
+          "lastStatusCode"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deviceCode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastEventAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastStatusCode": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "DeviceEventDto": {
+        "required": [
+          "id",
+          "statusCode",
+          "occurredAtUtc",
+          "receivedAtUtc",
+          "payload"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "statusCode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "occurredAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receivedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {},
+            "description": "Device-specific JSON object exactly as the device sent it; no fixed schema. Null when absent."
+          }
+        }
+      },
+      "DeviceListItemDto": {
+        "required": [
+          "id",
+          "deviceCode",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deviceCode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PagedResultOfDeviceEventDto": {
+        "required": [
+          "items",
+          "nextCursor",
+          "hasMore"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceEventDto"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "examples": [
+              "device.not_found"
+            ],
+            "type": "string",
+            "description": "Stable machine-readable error code, e.g. 'device.not_found'. Absent on request validation errors (see 'errors')."
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Only on 400 request validation errors: invalid fields mapped to their messages."
+          },
+          "traceId": {
+            "type": "string",
+            "description": "Request trace id; include it when reporting a problem."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Mobile (temporarily public)",
+      "description": "No authentication yet; see info.description."
+    }
+  ]
+}

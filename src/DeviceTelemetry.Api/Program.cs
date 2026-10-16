@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using DeviceTelemetry.Api.Http;
 using DeviceTelemetry.Application;
 using DeviceTelemetry.Application.Telemetry;
@@ -20,13 +21,21 @@ public class Program
 
         builder.Services
             .AddControllers()
-            .AddJsonOptions(options => options.JsonSerializerOptions.MaxDepth = 32);
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.MaxDepth = 32;
+                // Numbers must be JSON numbers ("statusCode": 100001, not "100001"); also keeps OpenAPI number types exact.
+                options.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+            });
+        // The OpenAPI generator reads these (not the MVC ones): keep them identical so the document matches the wire format.
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
         builder.Services.AddProblemDetails();
         builder.Services.AddExceptionHandler<BadHttpRequestExceptionHandler>();
         builder.Services.AddExceptionHandler<DatabaseUnavailableExceptionHandler>();
 
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-        builder.Services.AddOpenApi();
+        builder.Services.AddOpenApi(options => options.AddSchemaTransformer<RawJsonSchemaTransformer>());
 
         builder.Services.AddOptions<TelemetryOptions>()
             .Bind(builder.Configuration.GetSection(TelemetryOptions.SectionName))
