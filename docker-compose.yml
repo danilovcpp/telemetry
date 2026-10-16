@@ -3,7 +3,7 @@
 #   docker compose logs api | grep "Staging API key"   # device keys from the first start
 services:
   api:
-    image: ${API_IMAGE:-fkonstantin/telemetry:1.1.0}
+    image: ${API_IMAGE:-fkonstantin/telemetry:1.2.0}
     env_file: .env
     ports:
       - "${API_PORT:-8080}:8080"
