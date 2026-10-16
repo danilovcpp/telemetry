@@ -135,7 +135,7 @@ docker compose logs api | grep "Staging API key"
 Локальный архив образа без публикации:
 
 ```bash
-dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer   -p:ContainerArchiveOutputPath=artifacts/telemetry-1.0.0.tar
+dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer   -p:ContainerArchiveOutputPath=artifacts/telemetry-1.1.0.tar
 ```
 
 `docker-compose.yml` в корне репозитория поднимает полный стенд из `.env`: API, собственный PostgreSQL и Mailpit (веб-интерфейс почты — http://localhost:8025):

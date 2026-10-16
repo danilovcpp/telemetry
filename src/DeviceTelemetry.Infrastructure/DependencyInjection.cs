@@ -28,6 +28,10 @@ public static class DependencyInjection
         // Scoped: one DbContext per HTTP request or per outbox batch, never shared between threads.
         services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+        services.AddOptions<StagingSeedOptions>()
+            .Bind(configuration.GetSection(StagingSeedOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddScoped<StagingDataSeeder>();
 
         services.AddOptions<SmtpOptions>()

@@ -1,16 +1,15 @@
 # Развёртывание на VPS (Staging)
 
-Гайд описывает, как собрать образ, опубликовать его в Docker Hub (`fkonstantin/telemetry`) и запустить сервис на VPS рядом с уже работающим контейнером PostgreSQL. На старте в окружении `Staging` сервис:
+Гайд описывает, как собрать образ, опубликовать его в Docker Hub (`fkonstantin/telemetry`) и запустить сервис на VPS. PostgreSQL уже работает там в сети `infra`, письма отправляются через Gmail. На старте в окружении `Staging` сервис:
 
 1. сам создаёт базу `device_telemetry` и применяет миграции;
-2. создаёт 10 клиентов, 50 устройств и 2 шаблона писем;
+2. создаёт 10 клиентов, 50 устройств и 2 шаблона писем; адреса клиентов указывают на ваш реальный ящик (см. 2.2);
 3. пишет в лог API-ключи всех 50 устройств.
 
 ```
-VPS
-├── postgres   (уже есть; host: postgres, user/password: postgres)
-├── telemetry  (fkonstantin/telemetry, порт 8080)
-└── mailpit    (тестовый SMTP: перехватывает письма; веб-интерфейс на 127.0.0.1:8025)
+VPS, docker-сеть infra
+├── postgres   (уже есть: host postgres, user/password postgres)
+└── telemetry  (fkonstantin/telemetry, порт 8080) ──SMTP──► smtp.gmail.com:587
 ```
 
 ---
@@ -31,7 +30,7 @@ VPS
 
 ### 1.2. Сборка и публикация (рекомендуется: Docker не нужен)
 
-Образ собирает .NET SDK. Получается один мультиархитектурный образ для `linux/amd64` и `linux/arm64` с тегами `1.0.0` и `latest`. Нужен только .NET SDK 10.
+Образ собирает .NET SDK. Получается один мультиархитектурный образ для `linux/amd64` и `linux/arm64` с тегами версии (сейчас `1.1.0`) и `latest`. Нужен только .NET SDK 10.
 
 PowerShell:
 
@@ -49,25 +48,25 @@ DOTNET_CONTAINER_REGISTRY_UNAME=fkonstantin DOTNET_CONTAINER_REGISTRY_PWORD='<ac
   dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer -p:ContainerRegistry=docker.io
 ```
 
-В конце вывода должна быть строка о публикации образа `fkonstantin/telemetry:1.0.0, latest` в `docker.io`.
+В конце вывода должна быть строка о публикации образа `fkonstantin/telemetry:1.1.0, latest` в `docker.io`.
 
-**Новая версия:** добавьте `-p:Version=1.0.1`. Тот же номер станет тегом образа, тег `latest` перезапишется.
+**Новая версия:** поменяйте `<Version>` в `DeviceTelemetry.Api.csproj` или добавьте `-p:Version=1.1.1`. Номер версии станет тегом образа, тег `latest` перезапишется.
 
 ### 1.3. Альтернатива: через Docker (Docker Desktop или buildx)
 
 ```bash
-docker login -u fkonstantin                       # пароль = access token
+docker login -u fkonstantin                      # пароль = access token
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f src/DeviceTelemetry.Api/Dockerfile \
-  -t fkonstantin/telemetry:1.0.0 -t fkonstantin/telemetry:latest \
+  -t fkonstantin/telemetry:1.1.0 -t fkonstantin/telemetry:latest \
   --push .
 ```
 
-Если VPS только на amd64, достаточно `docker build -f src/DeviceTelemetry.Api/Dockerfile -t fkonstantin/telemetry:1.0.0 .` и затем `docker push fkonstantin/telemetry:1.0.0`.
+Если VPS только на amd64, достаточно `docker build -f src/DeviceTelemetry.Api/Dockerfile -t fkonstantin/telemetry:1.1.0 .` и затем `docker push fkonstantin/telemetry:1.1.0`.
 
 ### 1.4. Проверка
 
-На https://hub.docker.com/r/fkonstantin/telemetry/tags должны появиться теги `1.0.0` и `latest` с архитектурами `linux/amd64` и `linux/arm64`.
+На https://hub.docker.com/r/fkonstantin/telemetry/tags должны появиться теги `1.1.0` и `latest` с архитектурами `linux/amd64` и `linux/arm64`.
 
 ---
 
@@ -75,57 +74,71 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 Все команды выполняются на VPS по SSH.
 
-### 2.1. Проверка базы данных
+### 2.1. Что уже должно работать
+
+Контейнер PostgreSQL из вашего compose-файла запущен и подключён к внешней сети `infra`. Внутри этой сети он доступен по имени сервиса `postgres`. Проверка:
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Networks}}'
+docker network inspect infra --format '{{range .Containers}}{{.Name}} {{end}}'
 ```
 
-Найдите контейнер PostgreSQL. Его имя понадобится в 2.2; ниже предполагается, что он называется `postgres`.
+В выводе должен быть контейнер PostgreSQL. Отдельная сеть не нужна: telemetry подключится к той же `infra`.
 
-База `device_telemetry` создастся автоматически. Пользователь `postgres` — суперпользователь, прав на это хватит.
+База `device_telemetry` создастся автоматически. Пользователь `postgres` — суперпользователь, прав на это хватит. Ваша база `postgres` (`POSTGRES_DB`) не используется и не меняется.
 
-> **Важно:** тестовые данные создаются, только если в базе `device_telemetry` нет ни одного клиента. Если такая база уже существует с данными, seed будет пропущен и ключи не появятся в логе.
+> **Важно:** тестовые данные создаются, только если в базе `device_telemetry` нет ни одного клиента. Если такая база уже существует с данными (например, после прошлого запуска), seed будет пропущен и ключи не появятся в логе — см. 2.5, как пересоздать данные.
 
-### 2.2. Общая сеть для API и PostgreSQL
+### 2.2. Gmail: пароль приложения
 
-Контейнер API найдёт хост `postgres`, только если оба контейнера подключены к одной пользовательской Docker-сети. Создайте сеть и подключите к ней существующий контейнер БД с алиасом `postgres`:
+Обычный пароль Google-аккаунта для SMTP не подходит, нужен **пароль приложения**:
 
-```bash
-docker network create telemetry-db
-docker network connect --alias postgres telemetry-db postgres   # последний аргумент — имя контейнера из 2.1
-```
+1. Включите двухэтапную аутентификацию: https://myaccount.google.com/signinoptions/two-step-verification.
+2. Откройте https://myaccount.google.com/apppasswords, введите название (например, `telemetry-staging`) и нажмите **Создать**.
+3. Скопируйте 16-символьный пароль **без пробелов** (Google показывает его группами по 4 символа).
 
-Проверка — в выводе должно быть имя контейнера БД:
+Для аккаунтов Google Workspace пароли приложений должен разрешить администратор домена. Если пункта нет — обратитесь к администратору.
 
-```bash
-docker network inspect telemetry-db --format '{{range .Containers}}{{.Name}} {{end}}'
-```
+**Куда приходят письма.** Тестовые клиенты создаются с плюс-адресами ящика из `NOTIFY_EMAIL`: при `NOTIFY_EMAIL=me@gmail.com` клиент 1 получает адрес `me+customer01@gmail.com`, клиент 10 — `me+customer10@gmail.com`. Gmail доставляет все такие письма в ящик `me@gmail.com`, а по адресу получателя видно, какому клиенту оно ушло.
 
-> `docker network connect` не переживает **пересоздание** контейнера БД (`docker compose up` с изменениями, `docker rm`). Обычный перезапуск (`docker restart`) не страшен. Если PostgreSQL поднят через свой compose-файл, надёжнее добавить сеть туда:
->
-> ```yaml
-> services:
->   postgres:
->     networks: [default, telemetry-db]
-> networks:
->   telemetry-db:
->     external: true
-> ```
+> Gmail может не показывать во «Входящих» письма, отправленные самому себе через SMTP: они видны в «Отправленных» и «Вся почта». Поэтому `NOTIFY_EMAIL` лучше указать **другой** ящик, не тот, с которого идёт отправка. Если ящик один и тот же — ищите письма запросом `to:me+customer01@gmail.com`.
 
-### 2.3. docker-compose.yml
+Ограничение Gmail: около 500 писем в сутки для обычного аккаунта (2000 для Workspace). Каждое событие со статусом `100001` или `100002` — одно письмо.
+
+### 2.3. Файлы на VPS
 
 ```bash
 mkdir -p ~/telemetry && cd ~/telemetry
-nano docker-compose.yml
 ```
 
-Вставьте содержимое:
+**`.env`** — секреты, лежат рядом с compose-файлом:
+
+```bash
+nano .env
+```
+
+```env
+# Gmail-аккаунт, с которого отправляются письма
+GMAIL_ADDRESS=sender@gmail.com
+# Пароль приложения из шага 2.2, 16 символов без пробелов
+GMAIL_APP_PASSWORD=abcdefghijklmnop
+# Ящик, куда должны приходить уведомления тестовых клиентов
+NOTIFY_EMAIL=me@gmail.com
+```
+
+```bash
+chmod 600 .env
+```
+
+**`docker-compose.yml`:**
+
+```bash
+nano docker-compose.yml
+```
 
 ```yaml
 services:
   telemetry:
-    image: fkonstantin/telemetry:1.0.0
+    image: fkonstantin/telemetry:1.1.0
     container_name: telemetry
     restart: unless-stopped
     ports:
@@ -134,52 +147,48 @@ services:
       # Именно "Staging": включает миграции на старте, создание тестовых данных и логирование ключей.
       ASPNETCORE_ENVIRONMENT: "Staging"
 
-      # База создаётся автоматически. Host = алиас контейнера БД из шага 2.2.
+      # Хост postgres — имя сервиса БД в сети infra. База device_telemetry создаётся автоматически.
       ConnectionStrings__TelemetryDatabase: "Host=postgres;Port=5432;Database=device_telemetry;Username=postgres;Password=postgres"
 
-      # Почта. По умолчанию все письма перехватывает mailpit (см. 2.6); для настоящей отправки — раздел 3.
-      Smtp__Host: "mailpit"
-      Smtp__Port: "1025"
-      Smtp__Security: "None"
-      Smtp__Username: ""
-      Smtp__Password: ""
-      Smtp__FromEmail: "telemetry@example.com"
+      # Gmail SMTP. Значения подставляются из .env; без них compose не запустится.
+      Smtp__Host: "smtp.gmail.com"
+      Smtp__Port: "587"
+      Smtp__Security: "StartTls"
+      Smtp__Username: "${GMAIL_ADDRESS:?укажите GMAIL_ADDRESS в .env}"
+      Smtp__Password: "${GMAIL_APP_PASSWORD:?укажите GMAIL_APP_PASSWORD в .env}"
+      Smtp__FromEmail: "${GMAIL_ADDRESS:?укажите GMAIL_ADDRESS в .env}"
       Smtp__FromName: "Device Telemetry (Staging)"
-    networks:
-      - default
-      - telemetry-db
-    depends_on:
-      - mailpit
 
-  mailpit:
-    image: axllent/mailpit:v1.27
-    container_name: telemetry-mailpit
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8025:8025"           # веб-интерфейс только локально, доступ через SSH-туннель
+      # Адреса тестовых клиентов: NOTIFY_EMAIL с суффиксом +customerNN (см. 2.2).
+      StagingSeed__RecipientEmail: "${NOTIFY_EMAIL:?укажите NOTIFY_EMAIL в .env}"
+    networks:
+      - infra
 
 networks:
-  telemetry-db:
-    external: true                      # сеть из шага 2.2
+  infra:
+    name: infra
+    external: true                      # та же сеть, что у PostgreSQL
 ```
 
 #### Что заполнить или проверить
 
-| Параметр | Значение по умолчанию | Когда менять |
-|---|---|---|
-| `image` | `fkonstantin/telemetry:1.0.0` | при новой версии или другом логине Docker Hub |
-| `ports` у `telemetry` | `8080:8080` | если порт 8080 на VPS занят (меняйте только левую часть) |
-| `ASPNETCORE_ENVIRONMENT` | `Staging` | не менять: другое значение отключит seed |
-| `ConnectionStrings__TelemetryDatabase` | `Host=postgres;…;Username=postgres;Password=postgres` | если отличаются алиас, порт, пользователь или пароль БД |
-| `Smtp__*` | mailpit | для отправки настоящих писем (раздел 3) |
-| `Smtp__FromEmail` | `telemetry@example.com` | обязательно корректный адрес; при настоящем SMTP — адрес вашего домена |
-| `networks.telemetry-db` | `telemetry-db` | если в 2.2 вы назвали сеть иначе |
+| Где | Параметр | Значение | Когда менять |
+|---|---|---|---|
+| `.env` | `GMAIL_ADDRESS` | ваш Gmail-адрес | обязательно |
+| `.env` | `GMAIL_APP_PASSWORD` | пароль приложения из 2.2 | обязательно |
+| `.env` | `NOTIFY_EMAIL` | ящик для писем тестовых клиентов | обязательно |
+| compose | `image` | `fkonstantin/telemetry:1.1.0` | при новой версии образа |
+| compose | `ports` | `8080:8080` | если порт 8080 на VPS занят (меняйте только левую часть) |
+| compose | `ASPNETCORE_ENVIRONMENT` | `Staging` | не менять: другое значение отключит seed |
+| compose | `ConnectionStrings__TelemetryDatabase` | `Host=postgres;…;Username=postgres;Password=postgres` | если сменятся имя сервиса БД, пользователь или пароль |
+| compose | `Smtp__FromEmail` | = `GMAIL_ADDRESS` | можно указать другой адрес, только если он добавлен в Gmail как «Отправлять письма от имени»; иначе Gmail подставит основной |
 
-Необязательные параметры: значения по умолчанию подходят, менять только при необходимости. Добавляются в тот же блок `environment`:
+Необязательные параметры: значения по умолчанию подходят, менять только при необходимости. Добавляются в блок `environment`:
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `Outbox__PollingInterval` | `00:00:05` | как часто фоновый процесс проверяет очередь писем |
+| `Smtp__Timeout` | `00:00:30` | таймаут соединения с SMTP |
+| `Outbox__PollingInterval` | `00:00:05` | как часто проверяется очередь писем |
 | `Outbox__MaxAttempts` | `8` | число попыток отправки письма |
 | `Outbox__BaseRetryDelay` / `Outbox__MaxRetryDelay` | `00:00:30` / `01:00:00` | задержки между повторами |
 | `Telemetry__MaxPayloadBytes` | `8192` | максимальный размер `payload` |
@@ -189,16 +198,20 @@ networks:
 
 ### 2.4. Запуск
 
-Для приватного репозитория сначала выполните `docker login -u fkonstantin` (пароль — access token).
+Перед первым запуском убедитесь, что VPS может подключаться к Gmail. Некоторые хостинги по умолчанию блокируют исходящий SMTP:
 
 ```bash
-docker compose up -d
-docker compose ps
+timeout 5 bash -c '</dev/tcp/smtp.gmail.com/587' && echo "587 открыт" || echo "587 закрыт"
 ```
 
-Первый старт:
+Если порт закрыт — откройте его в настройках хостинга или фаервола либо используйте порт 465 (см. таблицу неполадок).
+
+Для приватного репозитория выполните `docker login -u fkonstantin` (пароль — access token).
 
 ```bash
+cd ~/telemetry
+docker compose config --quiet && echo "конфигурация в порядке"   # проверит, что .env заполнен
+docker compose up -d
 docker compose logs -f telemetry
 ```
 
@@ -208,7 +221,7 @@ docker compose logs -f telemetry
 info: Microsoft.EntityFrameworkCore.Migrations[20402]
       Applying migration '20261016121531_InitialSchema'.
 warn: DeviceTelemetry.Infrastructure.Persistence.Seeding.StagingDataSeeder[0]
-      Staging seed created 10 customers and 50 devices and notification templates for status codes 100001, 100002. ...
+      Staging seed created 10 customers (me+customer01@gmail.com - me+customer10@gmail.com) and 50 devices and notification templates for status codes 100001, 100002. ...
 warn: DeviceTelemetry.Infrastructure.Persistence.Seeding.StagingDataSeeder[0]
       Staging API key for device stg-device-001 (customer Staging Customer 01): dtk_...
 ...
@@ -236,11 +249,11 @@ wc -l ~/telemetry/device-keys.txt                 # должно быть 50
 docker compose run --rm telemetry issue-device-key stg-device-001
 ```
 
-Получить все ключи заново можно только полным пересозданием тестовых данных — удалением базы:
+Получить все ключи заново (или применить новый `NOTIFY_EMAIL`) можно только пересозданием тестовых данных — удалением базы `device_telemetry`. Имя контейнера PostgreSQL можно посмотреть в выводе команды из 2.1:
 
 ```bash
 docker compose stop telemetry
-docker exec -it postgres psql -U postgres -c 'DROP DATABASE device_telemetry WITH (FORCE);'
+docker exec -it <контейнер-postgres> psql -U postgres -c 'DROP DATABASE device_telemetry WITH (FORCE);'
 docker compose start telemetry                     # база, данные и ключи создадутся заново
 ```
 
@@ -257,21 +270,29 @@ curl -i -X POST http://localhost:8080/api/telemetry/send \
   -d '{"deviceId":"stg-device-001","statusCode":100001,"payload":{"temperature":25.4}}'
 ```
 
-Ожидается `HTTP/1.1 202 Accepted` с `"notificationQueued":true`. Для статуса без шаблона (например, `200`) ответ тоже 202, но с `"notificationQueued":false`.
+Ожидается `HTTP/1.1 202 Accepted` с `"notificationQueued":true`. Для статуса без шаблона (например, `200`) ответ тоже 202, но с `"notificationQueued":false` — письмо не отправляется.
 
-Письма, перехваченные mailpit: на своём компьютере откройте туннель и зайдите на http://localhost:8025.
+Через несколько секунд в ящик `NOTIFY_EMAIL` придёт письмо «Error 100001 on Staging Sensor 001» на адрес `…+customer01@…`. В логе появится строка:
 
 ```bash
-ssh -L 8025:127.0.0.1:8025 <user>@<vps-ip>
+docker compose logs telemetry | grep "Outbox message"
+#   Outbox message ... for event ... sent on attempt 1 in 850 ms
 ```
 
-В течение примерно 5 секунд после запроса там появится письмо для `customer01@example.com` с темой «Error 100001 on Staging Sensor 001».
+Состояние очереди писем:
+
+```bash
+docker exec -it <контейнер-postgres> psql -U postgres -d device_telemetry \
+  -c 'SELECT "Status", "Attempts", "LastError", "CreatedAtUtc" FROM "OutboxMessages" ORDER BY "CreatedAtUtc" DESC LIMIT 10;'
+```
+
+`Sent` — письмо принято Gmail. `Pending` с `LastError` — будет повтор. `Failed` — попытки исчерпаны, причина указана в `LastError`.
 
 Тестовые данные:
 
 | Что | Значения |
 |---|---|
-| Клиенты | `Staging Customer 01` … `10`, email `customer01@example.com` … `customer10@example.com` |
+| Клиенты | `Staging Customer 01` … `10`, адреса `<NOTIFY_EMAIL с +customer01>` … `+customer10` |
 | Устройства | `stg-device-001` … `stg-device-050`; устройство N принадлежит клиенту ((N−1) mod 10) + 1 |
 | Шаблоны | `100001` — HTML-письмо об ошибке, `100002` — текстовое письмо о низком заряде |
 
@@ -279,29 +300,11 @@ ssh -L 8025:127.0.0.1:8025 <user>@<vps-ip>
 
 ---
 
-## Часть 3. Настоящая отправка писем (необязательно)
-
-Если письма должны уходить реальным получателям, замените блок `Smtp__*` данными вашего почтового провайдера, а сервис `mailpit` и `depends_on` можно удалить:
-
-```yaml
-      Smtp__Host: "smtp.example.com"
-      Smtp__Port: "587"
-      Smtp__Security: "StartTls"          # для порта 465: "SslOnConnect"
-      Smtp__Username: "<логин SMTP>"
-      Smtp__Password: "<пароль SMTP>"
-      Smtp__FromEmail: "telemetry@your-domain.com"
-      Smtp__FromName: "Device Telemetry"
-```
-
-Учтите, что тестовые клиенты имеют адреса `@example.com` — письма на них не будут доставлены. Пароль SMTP не стоит хранить в compose-файле, если он лежит в git. Создайте рядом файл `.env` (`chmod 600`) со строкой `SMTP_PASSWORD=...` и укажите в compose `Smtp__Password: "${SMTP_PASSWORD}"`.
-
----
-
 ## Обновление и обслуживание
 
 ```bash
 cd ~/telemetry
-# обновить версию: поменять тег в image: (например, 1.0.1), затем
+# обновить версию: поменять тег в image: (например, 1.1.1), затем
 docker compose pull && docker compose up -d
 docker compose logs --tail=100 telemetry
 docker compose restart telemetry
@@ -312,19 +315,27 @@ docker compose down          # остановить; данные в PostgreSQL 
 
 ## Если что-то не работает
 
-| Симптом в `docker compose logs telemetry` | Причина и решение |
+| Симптом | Причина и решение |
 |---|---|
-| `Name or service not known` / `Resource temporarily unavailable` для `postgres` | API и БД не в одной сети: повторите шаг 2.2, проверьте `docker network inspect telemetry-db` |
+| `docker compose up`: `required variable GMAIL_... is missing` | не заполнен `.env` или он лежит не в одной папке с `docker-compose.yml` |
+| `network infra declared as external, but could not be found` | сеть `infra` не создана или называется иначе: `docker network ls` |
+| `Name or service not known` для `postgres` | контейнер БД не в сети `infra` или его сервис называется не `postgres` (проверка — 2.1) |
 | `password authentication failed for user "postgres"` | неверный пароль в `ConnectionStrings__TelemetryDatabase` |
-| `OptionsValidationException ... Smtp` | не заполнены `Smtp__Host` или `Smtp__FromEmail`, либо `FromEmail` — некорректный адрес |
-| `Staging seed skipped: the database already contains customers` | база уже содержит данные; ключи — в сохранённом файле или через `issue-device-key` (2.5) |
+| `OptionsValidationException ... Smtp` или `... StagingSeed` | некорректный `GMAIL_ADDRESS` или `NOTIFY_EMAIL` |
+| `Staging seed skipped: the database already contains customers` | база уже с данными; ключи — в `device-keys.txt` или через `issue-device-key`, пересоздание — 2.5 |
 | Нет строк `Staging seed` | `ASPNETCORE_ENVIRONMENT` не равен `Staging` (проверьте написание) |
-| Контейнер постоянно перезапускается | смотрите первую ошибку в `docker compose logs telemetry`; пока БД недоступна, сервис падает и `restart: unless-stopped` повторяет запуск |
+| В логе `Outbox message ... failed ... SMTP authentication failed`, в `LastError` есть `535 5.7.8` | неверный пароль приложения или в `GMAIL_APP_PASSWORD` попали пробелы; создайте новый пароль (2.2), исправьте `.env`, затем `docker compose up -d` |
+| `SMTP connection failed: ... timed out` | хостинг блокирует порт 587. Попробуйте 465: `Smtp__Port: "465"`, `Smtp__Security: "SslOnConnect"`; либо попросите хостинг открыть исходящий SMTP |
+| `SMTP server replied 550` / `554`, сообщение в `Failed` сразу | Gmail отклонил письмо (лимит, подозрение на спам). Подробности — в `LastError` |
+| Письма уходят (`Sent`), но их нет во «Входящих» | отправка самому себе: смотрите «Отправленные» и «Вся почта» либо укажите другой `NOTIFY_EMAIL` (2.2) |
 | `exec format error` | архитектура образа не совпадает с VPS: соберите мультиархитектурный образ (1.2 или 1.3) |
 | Ответ `401 device.authentication_failed` | неверный ключ или `deviceId`; ключ должен соответствовать именно этому устройству |
 
+Временные ошибки SMTP не теряют письма: они повторяются с растущей задержкой до 8 попыток, примерно 1,5 часа. Если исправить настройки в этот промежуток, письма уйдут сами.
+
 ## Безопасность
 
-- Этот стенд — тестовый. Ключи устройств лежат в логах контейнера и в `device-keys.txt`; не используйте Staging-окружение для реальных устройств.
+- Этот стенд — тестовый. Ключи устройств лежат в логах контейнера и в `device-keys.txt`. Не используйте Staging-окружение для реальных устройств.
+- Пароль приложения Gmail даёт полный доступ к отправке почты от вашего имени. Храните его только в `.env` (`chmod 600`), не коммитьте, а при утечке отзовите на https://myaccount.google.com/apppasswords.
 - API работает по HTTP на порту 8080, а устройства передают ключ в заголовке. Для доступа извне поставьте перед сервисом reverse proxy с HTTPS (nginx, Caddy, Traefik) и откройте наружу только его.
 - Пароль `postgres/postgres` годится только для изолированного стенда. Не публикуйте порт 5432 контейнера БД наружу.

@@ -3,6 +3,7 @@ using DeviceTelemetry.Infrastructure.Persistence.Seeding;
 using DeviceTelemetry.Tests.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.IntegrationTests;
 
@@ -19,10 +20,31 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
         await db.Database.EnsureDeletedAsync();
     }
 
-    private async Task<IReadOnlyList<SeededDevice>> SeedAsync()
+    private async Task<IReadOnlyList<SeededDevice>> SeedAsync(string? recipientEmail = null)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
-        return await new StagingDataSeeder(db, NullLogger<StagingDataSeeder>.Instance).SeedAsync(CancellationToken.None);
+        var options = Options.Create(new StagingSeedOptions { RecipientEmail = recipientEmail });
+        return await new StagingDataSeeder(db, options, NullLogger<StagingDataSeeder>.Instance).SeedAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Customers_get_plus_addresses_of_the_configured_recipient()
+    {
+        await SeedAsync(recipientEmail: "owner@gmail.com");
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var emails = await db.Customers.OrderBy(c => c.Id).Select(c => c.Email).ToListAsync();
+        Assert.Equal("owner+customer01@gmail.com", emails[0]);
+        Assert.Equal("owner+customer10@gmail.com", emails[^1]);
+    }
+
+    [Fact]
+    public async Task Without_recipient_customers_get_example_addresses()
+    {
+        await SeedAsync();
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.True(await db.Customers.AllAsync(c => c.Email!.EndsWith("@example.com")));
     }
 
     [Fact]
@@ -72,7 +94,7 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
     [Fact]
     public async Task Concurrent_instances_seed_only_once()
     {
-        var results = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(SeedAsync)));
+        var results = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(() => SeedAsync())));
 
         Assert.Single(results, r => r.Count == StagingDataSeeder.DeviceCount);
         await using var db = PostgresFixture.CreateContext(_connectionString);

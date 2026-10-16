@@ -3,6 +3,7 @@ using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.Infrastructure.Persistence.Seeding;
 
@@ -11,7 +12,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Seeding;
 /// Runs once: if any customer exists the database is left untouched, so restarts never duplicate data or rotate keys.
 /// The plain API keys are logged because nothing else can recover them later; never call this outside Staging.
 /// </summary>
-public sealed class StagingDataSeeder(ApplicationDbContext db, ILogger<StagingDataSeeder> logger)
+public sealed class StagingDataSeeder(
+    ApplicationDbContext db,
+    IOptions<StagingSeedOptions> options,
+    ILogger<StagingDataSeeder> logger)
 {
     public const int CustomerCount = 10;
     public const int DeviceCount = 50;
@@ -36,7 +40,7 @@ public sealed class StagingDataSeeder(ApplicationDbContext db, ILogger<StagingDa
             .Select(i => new Customer
             {
                 Name = $"Staging Customer {i:00}",
-                Email = $"customer{i:00}@example.com",
+                Email = options.Value.CustomerEmail(i),
             })
             .ToList();
 
@@ -65,9 +69,10 @@ public sealed class StagingDataSeeder(ApplicationDbContext db, ILogger<StagingDa
         await transaction.CommitAsync(ct);
 
         logger.LogWarning(
-            "Staging seed created {CustomerCount} customers and {DeviceCount} devices{Templates}. " +
+            "Staging seed created {CustomerCount} customers ({FirstCustomerEmail} - {LastCustomerEmail}) and {DeviceCount} devices{Templates}. " +
             "STAGING ONLY: device API keys follow; they are not stored in plain text and will not be shown again",
-            CustomerCount, DeviceCount, templatesAdded ? " and notification templates for status codes 100001, 100002" : string.Empty);
+            CustomerCount, customers[0].Email, customers[^1].Email, DeviceCount,
+            templatesAdded ? " and notification templates for status codes 100001, 100002" : string.Empty);
 
         foreach (var device in seeded)
         {
