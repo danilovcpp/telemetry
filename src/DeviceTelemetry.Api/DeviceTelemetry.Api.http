@@ -1,6 +1,29 @@
 @DeviceTelemetry.Api_HostAddress = http://localhost:5146
+# Issue a key with: dotnet run --project src/DeviceTelemetry.Api -- issue-device-key <deviceCode>
+@deviceKey = dtk_replace_me
 
-GET {{DeviceTelemetry.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Minimal contract
+POST {{DeviceTelemetry.Api_HostAddress}}/api/telemetry/send
+Content-Type: application/json
+X-Device-Key: {{deviceKey}}
 
-###
+{
+  "deviceId": "uid",
+  "statusCode": 100001
+}
+
+### Extended contract (idempotent through messageId)
+POST {{DeviceTelemetry.Api_HostAddress}}/api/telemetry/send
+Content-Type: application/json
+X-Device-Key: {{deviceKey}}
+
+{
+  "deviceId": "uid",
+  "statusCode": 100001,
+  "messageId": "b5e15f27-3fb8-4e25-8c2f-f1a1b203b821",
+  "occurredAtUtc": "2026-10-16T10:30:00Z",
+  "payload": {
+    "temperature": 25.4,
+    "voltage": 3.3
+  }
+}

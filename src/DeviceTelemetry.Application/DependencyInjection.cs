@@ -1,13 +1,15 @@
 ﻿using System.Reflection;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Notifications;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DeviceTelemetry.Application;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddIdentityApplication(this IServiceCollection services)
+    public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         var assembly = Assembly.GetExecutingAssembly();
 
@@ -16,6 +18,9 @@ public static class DependencyInjection
         // Register all command/query handlers.
         RegisterHandlers(services, assembly, typeof(ICommandHandler<,>));
         RegisterHandlers(services, assembly, typeof(IQueryHandler<,>));
+
+        services.AddSingleton<EmailTemplateRenderer>();
+        services.TryAddSingleton(TimeProvider.System);
 
         return services;
     }

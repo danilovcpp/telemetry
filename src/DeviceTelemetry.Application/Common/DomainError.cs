@@ -52,6 +52,11 @@ public enum DomainErrorType
     Conflict,
 
     /// <summary>
+    /// Caller could not be authenticated (missing or invalid credentials). Maps to HTTP 401.
+    /// </summary>
+    Unauthorized,
+
+    /// <summary>
     /// Caller is not allowed to perform this action. Maps to HTTP 403.
     /// </summary>
     Forbidden,

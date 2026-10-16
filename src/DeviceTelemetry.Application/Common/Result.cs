@@ -1,6 +1,5 @@
-﻿using DeviceTelemetry.Application.Common;
-
-namespace Identity.Core;
+﻿
+namespace DeviceTelemetry.Application.Common;
 
 /// <summary>
 /// Result of a domain operation: either a success carrying a value, or a failure carrying a <see cref="DomainError"/>.

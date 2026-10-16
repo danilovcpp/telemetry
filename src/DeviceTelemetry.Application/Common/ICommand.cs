@@ -1,5 +1,4 @@
-﻿using Identity.Core;
-
+﻿
 namespace DeviceTelemetry.Application.Common;
 
 /// <summary>
