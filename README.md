@@ -130,36 +130,19 @@ docker compose logs api | grep "Staging API key"
 
 `.env` (в git не попадает, шаблон — `.env.example`) содержит все переменные окружения сервиса: окружение, строку подключения, SMTP, Outbox, лимиты, логирование. Пароль PostgreSQL сгенерирован случайно. Значения пишутся без кавычек, так этот файл читают `docker run --env-file` и `docker compose`.
 
-Образ собирается средствами .NET SDK, Docker daemon для этого не нужен. Базовый образ — `mcr.microsoft.com/dotnet/aspnet:10.0`, linux/amd64, процесс работает от непривилегированного пользователя, порт 8080:
+Образ `fkonstantin/telemetry` (теги `$(Version)` и `latest`, linux/amd64 и linux/arm64, базовый образ `mcr.microsoft.com/dotnet/aspnet:10.0`, непривилегированный пользователь, порт 8080) собирается средствами .NET SDK, Docker daemon для этого не нужен. Публикация в Docker Hub и развёртывание на VPS рядом с существующим контейнером PostgreSQL — по шагам в [DEPLOY.md](DEPLOY.md).
+
+Локальный архив образа без публикации:
 
 ```bash
-dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer \
-  -p:ContainerArchiveOutputPath=artifacts/devicetelemetry-api-1.0.0.tar
+dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer   -p:ContainerArchiveOutputPath=artifacts/telemetry-1.0.0.tar
 ```
 
-Публикация в Docker Hub (`<user>` — ваш логин в Docker Hub):
-
-```bash
-docker load -i artifacts/devicetelemetry-api-1.0.0.tar
-docker tag devicetelemetry-api:1.0.0 <user>/devicetelemetry-api:1.0.0
-docker login && docker push <user>/devicetelemetry-api:1.0.0
-```
-
-Без Docker можно отправить образ прямо из SDK. Вместо пароля используйте access token Docker Hub:
-
-```bash
-DOTNET_CONTAINER_REGISTRY_UNAME=<user> DOTNET_CONTAINER_REGISTRY_PWORD=<access-token> \
-dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer \
-  -p:ContainerRegistry=docker.io -p:ContainerRepository=<user>/devicetelemetry-api
-```
-
-Запуск Staging-стенда (API, PostgreSQL и Mailpit; веб-интерфейс почты — http://localhost:8025). В `.env` укажите `API_IMAGE=<user>/devicetelemetry-api:1.0.0`, если образ берётся из Docker Hub:
+`docker-compose.yml` в корне репозитория поднимает полный стенд из `.env`: API, собственный PostgreSQL и Mailpit (веб-интерфейс почты — http://localhost:8025):
 
 ```bash
 docker compose up -d
 ```
-
-Образ можно собрать и из `src/DeviceTelemetry.Api/Dockerfile` (`docker build -f src/DeviceTelemetry.Api/Dockerfile -t devicetelemetry-api:1.0.0 .`).
 
 ## Ограничения и гарантии
 
