@@ -112,6 +112,55 @@ dotnet test tests/DeviceTelemetry.IntegrationTests
 
 Интеграционные тесты работают с настоящим PostgreSQL. Если задана переменная `DEVICETELEMETRY_TEST_POSTGRES` (строка подключения с правом создавать базы), тесты используют этот сервер; иначе Testcontainers запускает `postgres:17-alpine`, для чего нужен Docker. Каждый прогон создаёт и затем удаляет отдельную базу.
 
+## Staging: тестовые данные
+
+При `ASPNETCORE_ENVIRONMENT=Staging` приложение при старте применяет миграции (`appsettings.Staging.json`) и, если в базе ещё нет ни одного клиента, создаёт:
+
+- 10 клиентов `Staging Customer 01…10` с адресами `customerNN@example.com`;
+- 50 устройств `stg-device-001…050`, по 5 на клиента, у каждого свой API-ключ;
+- шаблоны для статусов `100001` (HTML) и `100002` (текст), если шаблонов в базе нет.
+
+**Ключи выводятся в лог один раз — при первом заполнении**, потому что в БД хранятся только их хеши. Дальнейшие перезапуски ничего не меняют. Если ключи потеряны, выдайте новый командой `issue-device-key` или пересоздайте базу. Несколько экземпляров, стартующих одновременно, заполняют базу один раз (используется advisory lock). В Development и Production тестовые данные не создаются.
+
+```bash
+docker compose logs api | grep "Staging API key"
+```
+
+## Docker-образ и `.env`
+
+`.env` (в git не попадает, шаблон — `.env.example`) содержит все переменные окружения сервиса: окружение, строку подключения, SMTP, Outbox, лимиты, логирование. Пароль PostgreSQL сгенерирован случайно. Значения пишутся без кавычек, так этот файл читают `docker run --env-file` и `docker compose`.
+
+Образ собирается средствами .NET SDK, Docker daemon для этого не нужен. Базовый образ — `mcr.microsoft.com/dotnet/aspnet:10.0`, linux/amd64, процесс работает от непривилегированного пользователя, порт 8080:
+
+```bash
+dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer \
+  -p:ContainerArchiveOutputPath=artifacts/devicetelemetry-api-1.0.0.tar
+```
+
+Публикация в Docker Hub (`<user>` — ваш логин в Docker Hub):
+
+```bash
+docker load -i artifacts/devicetelemetry-api-1.0.0.tar
+docker tag devicetelemetry-api:1.0.0 <user>/devicetelemetry-api:1.0.0
+docker login && docker push <user>/devicetelemetry-api:1.0.0
+```
+
+Без Docker можно отправить образ прямо из SDK. Вместо пароля используйте access token Docker Hub:
+
+```bash
+DOTNET_CONTAINER_REGISTRY_UNAME=<user> DOTNET_CONTAINER_REGISTRY_PWORD=<access-token> \
+dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer \
+  -p:ContainerRegistry=docker.io -p:ContainerRepository=<user>/devicetelemetry-api
+```
+
+Запуск Staging-стенда (API, PostgreSQL и Mailpit; веб-интерфейс почты — http://localhost:8025). В `.env` укажите `API_IMAGE=<user>/devicetelemetry-api:1.0.0`, если образ берётся из Docker Hub:
+
+```bash
+docker compose up -d
+```
+
+Образ можно собрать и из `src/DeviceTelemetry.Api/Dockerfile` (`docker build -f src/DeviceTelemetry.Api/Dockerfile -t devicetelemetry-api:1.0.0 .`).
+
 ## Ограничения и гарантии
 
 - **Email доставляется по принципу at-least-once.** Если SMTP-сервер принял письмо, а процесс упал до отметки `Sent`, письмо будет отправлено ещё раз после истечения lease. В оба письма записывается одинаковый `Message-ID` (id outbox-записи), по которому почтовые системы могут распознать дубликат. Гарантии exactly-once у SMTP нет.

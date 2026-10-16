@@ -3,6 +3,7 @@ using DeviceTelemetry.Application;
 using DeviceTelemetry.Application.Telemetry;
 using DeviceTelemetry.Infrastructure;
 using DeviceTelemetry.Infrastructure.Persistence;
+using DeviceTelemetry.Infrastructure.Persistence.Seeding;
 using Microsoft.EntityFrameworkCore;
 
 namespace DeviceTelemetry.Api;
@@ -40,11 +41,18 @@ public class Program
         if (AdminCommands.IsAdminCommand(args))
             return await AdminCommands.RunAsync(app.Services, args);
 
-        // Convenience for local development only; in production run `migrate` (or a migration bundle) as a deployment step.
+        // Convenience for Development and Staging; in production run `migrate` (or a migration bundle) as a deployment step.
         if (app.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
         {
             await using var scope = app.Services.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.MigrateAsync();
+        }
+
+        // Test data with logged API keys: Staging only, and only into an empty database.
+        if (app.Environment.IsStaging())
+        {
+            await using var scope = app.Services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<StagingDataSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
         }
 
         // Unhandled exceptions become problem responses without internal details.

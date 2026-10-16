@@ -3,6 +3,7 @@ using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Infrastructure.Integrations.Email;
 using DeviceTelemetry.Infrastructure.Outbox;
 using DeviceTelemetry.Infrastructure.Persistence;
+using DeviceTelemetry.Infrastructure.Persistence.Seeding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,7 @@ public static class DependencyInjection
         // Scoped: one DbContext per HTTP request or per outbox batch, never shared between threads.
         services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+        services.AddScoped<StagingDataSeeder>();
 
         services.AddOptions<SmtpOptions>()
             .Bind(configuration.GetSection(SmtpOptions.SectionName))

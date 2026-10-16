@@ -8,6 +8,19 @@
         <UserSecretsId>devicetelemetry-api</UserSecretsId>
     </PropertyGroup>
 
+    <!-- Container image built by `dotnet publish -t:PublishContainer` (no Docker daemon needed). Same base image as the Dockerfile. -->
+    <PropertyGroup>
+        <Version>1.0.0</Version>
+        <ContainerRepository>devicetelemetry-api</ContainerRepository>
+        <ContainerImageTags>$(Version);latest</ContainerImageTags>
+        <ContainerRuntimeIdentifier>linux-x64</ContainerRuntimeIdentifier>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ContainerLabel Include="org.opencontainers.image.title" Value="DeviceTelemetry API" />
+        <ContainerLabel Include="org.opencontainers.image.description" Value="Device telemetry ingestion with email notifications" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer"/>
         <PackageReference Include="Microsoft.AspNetCore.OpenApi"/>

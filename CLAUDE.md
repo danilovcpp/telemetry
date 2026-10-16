@@ -41,5 +41,6 @@ Clean Architecture: `Api → Application → Domain`, `Api → Infrastructure �
 - Notification problems (no template, no email, template error) are logged and must never prevent the telemetry event from being saved.
 - Idempotency relies on the unique index `(DeviceId, MessageId)` and `ContentHash`. Do not replace it with a pre-check `SELECT`.
 - Unknown devices and wrong keys deliberately return the same 401 `device.authentication_failed`; the distinction appears only in logs.
-- Never log `SendTelemetryCommand.DeviceKey`, `EmailMessage` contents, SMTP credentials or payloads. The command is a class rather than a record so it has no auto-generated `ToString`.
+- Never log `SendTelemetryCommand.DeviceKey`, `EmailMessage` contents, SMTP credentials or payloads. The command is a class rather than a record so it has no auto-generated `ToString`. The only exception is `StagingDataSeeder`: it runs only when the environment is Staging and the database is empty, and logs the generated device keys once by design.
+- The container image is built with `dotnet publish -t:PublishContainer` (settings are in `DeviceTelemetry.Api.csproj`); Docker is not required. Runtime configuration lives in `.env`, which is git-ignored; keep `.env.example` in sync when adding settings.
 - Outbox delivery is at-least-once. The outbox id is used as the SMTP `Message-ID`.

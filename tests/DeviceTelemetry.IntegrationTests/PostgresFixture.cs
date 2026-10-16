@@ -52,9 +52,24 @@ public sealed class PostgresFixture : IAsyncLifetime
         await db.Database.EnsureDeletedAsync();
     }
 
-    public ApplicationDbContext CreateContext(TimeProvider? timeProvider = null) =>
+    public ApplicationDbContext CreateContext(TimeProvider? timeProvider = null) => CreateContext(ConnectionString, timeProvider);
+
+    /// <summary>Creates an additional empty, migrated database on the same server; the caller drops it.</summary>
+    public async Task<string> CreateEmptyDatabaseAsync()
+    {
+        var connectionString = new NpgsqlConnectionStringBuilder(ConnectionString)
+        {
+            Database = $"device_telemetry_test_{Guid.NewGuid():N}",
+        }.ConnectionString;
+
+        await using var db = CreateContext(connectionString);
+        await db.Database.MigrateAsync();
+        return connectionString;
+    }
+
+    public static ApplicationDbContext CreateContext(string connectionString, TimeProvider? timeProvider = null) =>
         new(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(ConnectionString).Options,
+            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connectionString).Options,
             timeProvider ?? TimeProvider.System);
 }
 
