@@ -44,6 +44,42 @@ X-Device-Key: dtk_...
 
 Уникальный индекс `(DeviceId, MessageId)` защищает инвариант даже при параллельных повторах. Повтор с тем же содержимым (статус, переданное устройством `occurredAtUtc`, payload) возвращает исходное событие и не создаёт нового уведомления. Если содержимое другое, возвращается 409, исходное событие не меняется. Сообщения без `messageId` всегда считаются новыми.
 
+## Мобильный API (чтение)
+
+> **Временно публичный (MVP).** Endpoint-ы `/api/mobile/*` работают без аутентификации и явно помечены `[AllowAnonymous]`. `customerId` и `deviceId` в URL не доказывают права доступа: любой, кто достучится до сервиса, может прочитать устройства и историю любого клиента, перебирая числовые id. Перебор только замедляет лимит запросов с одного IP (`RateLimiting:Mobile`, по умолчанию 120 в минуту). До публичного production-запуска нужны аутентификация пользователя и проверка, что запрошенный клиент или устройство принадлежат ему.
+
+Все id здесь внутренние: `customerId` = `Customer.Id`, `deviceId` = `Device.Id` (поле `id` из списка устройств), а не `DeviceCode`. Ошибки — в том же формате Problem Details с полем `code`. Нечисловой id в пути даёт 400. При `ASPNETCORE_ENVIRONMENT=Development` полное описание лежит в OpenAPI: `GET /openapi/v1.json`, тег «Mobile (temporarily public)».
+
+| Endpoint | Ответ | Ошибки |
+|---|---|---|
+| `GET /api/mobile/customers/{customerId}/devices` | устройства клиента `[{id, deviceCode, name}]`, сортировка по `name`, затем по `id`; клиент без устройств — `[]` | 404 `customer.not_found` |
+| `GET /api/mobile/devices/{deviceId}` | `{id, deviceCode, name, customerId, lastEventAtUtc, lastStatusCode}` | 404 `device.not_found` |
+| `GET /api/mobile/devices/{deviceId}/events?limit=&cursor=` | страница `{items, nextCursor, hasMore}` | 400 `pagination.invalid_limit` / `pagination.invalid_cursor`, 404 `device.not_found` |
+
+**История событий** сортируется по `occurredAtUtc` по убыванию, затем по `id` по убыванию. `limit` — от 1 до 100, по умолчанию 20; значение вне диапазона даёт 400, а не тихую подрезку. Первая страница запрашивается без `cursor`. Пока `hasMore = true`, передавайте полученный `nextCursor` без изменений. Курсор непрозрачный: это позиция последнего события страницы (`occurredAtUtc`, `id`), поэтому события с одинаковым временем не теряются и не повторяются. Используется keyset-пагинация, а не `OFFSET`: стоимость страницы не растёт с глубиной. `payload` отдаётся JSON-объектом в том виде, в каком его прислало устройство, или `null`.
+
+```http
+GET /api/mobile/devices/15/events?limit=2
+```
+```json
+{
+  "items": [
+    { "id": "01a1455b-94b5-70f3-aa9c-7a54c081237d", "statusCode": 200,
+      "occurredAtUtc": "2026-10-16T10:05:00Z", "receivedAtUtc": "2026-10-16T15:36:32.18105Z",
+      "payload": { "t": "10:05:00Z", "v": 3.3 } },
+    { "id": "01a1455b-9485-758a-8877-2392d5e71be6", "statusCode": 200,
+      "occurredAtUtc": "2026-10-16T10:05:00Z", "receivedAtUtc": "2026-10-16T15:36:32.133399Z",
+      "payload": null }
+  ],
+  "nextCursor": "CN8rbPBsbgABoUVblIV1ioh3I5LV5xvm",
+  "hasMore": true
+}
+```
+
+**Карточка устройства.** `lastEventAtUtc` и `lastStatusCode` берутся из самого позднего события по времени устройства (`occurredAtUtc`). Это последний **известный** статус, а не гарантированное текущее состояние: heartbeat-контракта нет, а событие, буферизованное устройством и пришедшее позже, на карточку не влияет. Если событий нет, оба поля равны `null`.
+
+**Список устройств не пагинируется:** устройства заводятся вручную, и у клиента их немного. Если это изменится, пагинацию нужно добавить так же, через курсор.
+
 ## Шаблоны писем
 
 Таблица `Templates`: не больше одного шаблона на `StatusCode`. Уведомление отправляется, только если у шаблона `IsActive = true`. При `IsHtml = true` подставляемые значения HTML-экранируются.
@@ -72,7 +108,9 @@ dotnet run --project src/DeviceTelemetry.Api -- issue-device-key <deviceCode>
 | `Smtp` | `Host`, `Port`, `Security` (`StartTls`/`SslOnConnect`/`None`), `Username`, `Password`, `FromEmail`, `FromName`, `Timeout` |
 | `Outbox` | `BatchSize`, `PollingInterval`, `MaxAttempts`, `BaseRetryDelay`, `MaxRetryDelay`, `LockDuration` |
 | `Telemetry` | `MaxPayloadBytes`, `MaxClockSkew` |
-| `RateLimiting:Telemetry` | `PermitLimit`, `Window` |
+| `RateLimiting:Telemetry` | `PermitLimit`, `Window` — приём телеметрии, на IP |
+| `RateLimiting:Mobile` | `PermitLimit` (120), `Window` (1 мин) — мобильный API, на IP |
+| `StagingSeed` | `RecipientEmail` — ящик для писем тестовых клиентов (только Staging) |
 | `Kestrel:Limits:MaxRequestBodySize` | максимальный размер тела запроса |
 
 Настройки проверяются при запуске: без SMTP-хоста или корректного `FromEmail` приложение не стартует. Секреты в репозиторий не кладутся. Для локальной разработки используйте user secrets:

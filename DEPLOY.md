@@ -193,7 +193,8 @@ networks:
 | `Outbox__BaseRetryDelay` / `Outbox__MaxRetryDelay` | `00:00:30` / `01:00:00` | задержки между повторами |
 | `Telemetry__MaxPayloadBytes` | `8192` | максимальный размер `payload` |
 | `Kestrel__Limits__MaxRequestBodySize` | `32768` | максимальный размер тела запроса |
-| `RateLimiting__Telemetry__PermitLimit` / `__Window` | `600` / `00:01:00` | лимит запросов с одного IP |
+| `RateLimiting__Telemetry__PermitLimit` / `__Window` | `600` / `00:01:00` | лимит запросов телеметрии с одного IP |
+| `RateLimiting__Mobile__PermitLimit` / `__Window` | `120` / `00:01:00` | лимит запросов к мобильному API с одного IP |
 | `Logging__LogLevel__Default` | `Information` | уровень логов |
 
 ### 2.4. Запуск

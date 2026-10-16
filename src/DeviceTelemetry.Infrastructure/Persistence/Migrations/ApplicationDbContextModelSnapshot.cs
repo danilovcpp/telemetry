@@ -209,11 +209,11 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"MessageId\" IS NOT NULL");
 
-                    b.HasIndex("DeviceId", "OccurredAtUtc")
-                        .IsDescending(false, true);
-
                     b.HasIndex("StatusCode", "OccurredAtUtc")
                         .IsDescending(false, true);
+
+                    b.HasIndex("DeviceId", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true);
 
                     b.ToTable("TelemetryEvents", (string)null);
                 });

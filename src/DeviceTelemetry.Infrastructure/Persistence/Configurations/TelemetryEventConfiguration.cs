@@ -19,8 +19,9 @@ internal sealed class TelemetryEventConfiguration : IEntityTypeConfiguration<Tel
             .HasForeignKey(e => e.DeviceId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Device history ordered by time (newest first); also serves as the FK index.
-        builder.HasIndex(e => new { e.DeviceId, e.OccurredAtUtc }).IsDescending(false, true);
+        // Device history newest first, with Id as tie-breaker: matches the mobile history ORDER BY and keyset cursor
+        // exactly, serves the "last event" LIMIT 1 lookup, and doubles as the FK index.
+        builder.HasIndex(e => new { e.DeviceId, e.OccurredAtUtc, e.Id }).IsDescending(false, true, true);
 
         // Events of a given status across devices, e.g. "all errors in the last hour".
         builder.HasIndex(e => new { e.StatusCode, e.OccurredAtUtc }).IsDescending(false, true);
