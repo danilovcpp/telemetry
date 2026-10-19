@@ -163,9 +163,10 @@ public sealed class SilenceMonitorTests(PostgresFixture postgres) : IAsyncLifeti
         await CheckAsync();
 
         await using var verify = NewContext();
-        var email = (await verify.OutboxMessages.SingleAsync()).ReadEmail();
+        var silentEventId = (await ServerEventsAsync(device.Id)).Single(e => e.StatusCode == 190001).Id;
+        var email = (await verify.OutboxMessages.SingleAsync(m => m.TelemetryEventId == silentEventId)).ReadEmail();
         Assert.Equal("site-7@example.org", email.To);
-        Assert.Equal("Boiler #1: прибор не выходит на связь", email.Subject);
+        Assert.Equal("Boiler #1: device is not reporting", email.Subject);
     }
 
     private async Task<Device> ReloadAsync(int id)

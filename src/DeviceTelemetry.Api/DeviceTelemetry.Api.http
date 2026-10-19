@@ -44,3 +44,31 @@ X-Device-Key: {{deviceKey}}
 
 ### Device state (mobile API)
 GET {{DeviceTelemetry.Api_HostAddress}}/api/mobile/devices/1/state
+
+### 1.4: notification language chosen by the device (en, ru, de)
+POST {{DeviceTelemetry.Api_HostAddress}}/api/telemetry/send
+Content-Type: application/json
+X-Device-Key: {{deviceKey}}
+
+{
+  "deviceId": "uid",
+  "statusCode": 100001,
+  "notifyLanguage": "de"
+}
+
+### 1.5: device settings (absent fields are kept; invalid values are listed in "rejected")
+POST {{DeviceTelemetry.Api_HostAddress}}/api/telemetry/settings
+Content-Type: application/json
+X-Device-Key: {{deviceKey}}
+
+{
+  "deviceId": "uid",
+  "name": "DataLoggerSTM32",
+  "notifyEmail": "site-7@example.org",
+  "notifyLanguage": "ru",
+  "timeZone": "Europe/Berlin",
+  "reportIntervalS": 300,
+  "offlineAfterS": 1800,
+  "monitoring": true,
+  "channels": [ { "id": "ch1", "name": "130AA15P20" }, { "id": "ch2", "name": "TEX0000001" } ]
+}

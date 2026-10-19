@@ -72,7 +72,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## Часть 2. Развёртывание на VPS
 
-Все команды выполняются на VPS по SSH.
+Все команды выполняются на VPS по SSH. Если пользователь не входит в группу `docker`, ставьте `sudo` перед каждой командой `docker`. Папка проекта в гайде — `~/telemetry`; если compose-файл лежит в другом месте, папку работающего сервиса покажет `sudo docker inspect telemetry --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}'`.
 
 ### 2.1. Что уже должно работать
 
@@ -148,7 +148,7 @@ services:
       ASPNETCORE_ENVIRONMENT: "Staging"
 
       # Хост postgres — имя сервиса БД в сети infra. База device_telemetry создаётся автоматически.
-      ConnectionStrings__TelemetryDatabase: "Host=postgres;Port=5432;Database=device_telemetry;Username=postgres;Password=postgres"
+      ConnectionStrings__TelemetryDatabase: "Host=postgres;Port=5432;Database=device_telemetry;Username=postgres;Password=postgres;Gss Encryption Mode=Disable"
 
       # Gmail SMTP. Значения подставляются из .env; без них compose не запустится.
       Smtp__Host: "smtp.gmail.com"
@@ -316,6 +316,36 @@ docker compose down          # остановить; данные в PostgreSQL 
 
 Миграции новых версий применяются автоматически при старте. Seed при обновлении не повторяется.
 
+### Обновление до 1.5.0 (настройки прибора)
+
+```bash
+cd <папка проекта>
+sudo sed -i -E 's|fkonstantin/telemetry:[0-9.]+|fkonstantin/telemetry:1.5.0|' docker-compose.yml
+sudo docker compose pull && sudo docker compose up -d
+sudo docker compose logs -f telemetry | grep -m1 "Now listening"   # дождаться старта
+sudo docker compose run --rm telemetry sync-templates
+```
+
+- Миграция добавит прибору порог отключения, мониторинг, часовой пояс и справочник каналов (все колонки nullable).
+- `sync-templates` нужен: во всех эталонных письмах теперь две строки времени и добавлен `190003` («адрес уведомлений изменён»).
+- Новый путь `POST /api/telemetry/settings` — если перед сервисом стоит прокси с HTTP-исключением для приборов, добавьте его туда (пример в docs/device-protocol.md, раздел 6).
+
+### Обновление до 1.4.0 (языки писем)
+
+```bash
+cd <папка проекта>
+sudo sed -i -E 's|fkonstantin/telemetry:[0-9.]+|fkonstantin/telemetry:1.4.0|' docker-compose.yml
+sudo docker compose pull && sudo docker compose up -d
+sudo docker compose logs -f telemetry | grep -m1 "Now listening"   # дождаться старта
+sudo docker compose run --rm telemetry sync-templates
+```
+
+- В 1.4.0 `sync-templates`, запущенный одновременно со стартом Staging-контейнера, может упасть с `duplicate key … IX_Templates_StatusCode_Language`. Данные при этом не портятся — просто повторите команду. С 1.4.1 команда ждёт окончания стартового заполнения сама.
+- Миграция добавит языки шаблонам, клиентам и устройствам; прежние шаблоны получат `Language = NULL` и станут запасными.
+- **По умолчанию письма теперь на английском.** Русский для клиента: `sudo docker compose run --rm telemetry set-customer-language <customerId> ru` (или `all ru` — для всех). Прибор может выбрать язык сам полем `notifyLanguage`.
+- Запасные шаблоны без языка для эталонных кодов больше не используются (их перекрывают шаблоны на английском) — их можно удалить: `DELETE FROM "Templates" WHERE "Language" IS NULL AND "StatusCode" IN (100000,100001,100002,100003,100004,100005,100006,100007,100008,190001,190002);`
+- `100002` («низкий заряд батареи») с 1.4 входит в эталон: его не нужно отключать.
+
 ### Обновление с 1.2.0 до 1.3.0
 
 Образ `1.3.0` нужно сначала собрать и опубликовать (часть 1). Затем:
@@ -328,7 +358,7 @@ docker compose run --rm telemetry sync-templates
 ```
 
 - **Миграция** добавит новые колонки (все nullable) и заполнит время последнего контакта у существующих устройств по их событиям.
-- **Недостающие шаблоны** Staging добавит сам при старте, но уже существующие не трогает. `sync-templates` нужен, чтобы `100001` получил новый текст «проверка связи»; команда перечислит шаблоны, которых нет в эталоне. На стенде, заполненном версией 1.1/1.2, это `100002` («низкий заряд»): в эталоне его нет, и письма по нему продолжат уходить. Отключить: `docker exec -it <контейнер-postgres> psql -U postgres -d device_telemetry -c 'UPDATE "Templates" SET "IsActive" = false WHERE "StatusCode" = 100002;'`.
+- **Недостающие шаблоны** Staging добавит сам при старте, но уже существующие не трогает. `sync-templates` нужен, чтобы `100001` получил новый текст «проверка связи»; команда перечислит шаблоны, которых нет в эталоне. На стенде, заполненном версией 1.1/1.2, это `100002` («низкий заряд»): в эталоне 1.3 его нет, и письма по нему продолжат уходить (с 1.4 он снова эталонный). Отключить: `docker exec -it <контейнер-postgres> psql -U postgres -d device_telemetry -c 'UPDATE "Templates" SET "IsActive" = false WHERE "StatusCode" = 100002;'`.
 - **Контроль молчания** включается для устройства, как только оно пришлёт `reportIntervalS`. Прошивки без этого поля работают как раньше.
 - **Коды `190000`–`199999`** от устройств теперь отвергаются (`400`): они зарезервированы за сервером.
 
@@ -340,6 +370,8 @@ docker compose run --rm telemetry sync-templates
 | `network infra declared as external, but could not be found` | сеть `infra` не создана или называется иначе: `docker network ls` |
 | `Name or service not known` для `postgres` | контейнер БД не в сети `infra` или его сервис называется не `postgres` (проверка — 2.1) |
 | `password authentication failed for user "postgres"` | неверный пароль в `ConnectionStrings__TelemetryDatabase` |
+| `Cannot load library libgssapi_krb5.so.2` | безвредное предупреждение: драйвер пробует Kerberos-шифрование, библиотеки в образе нет, и он подключается по паролю. Убирается добавлением `;Gss Encryption Mode=Disable` в строку подключения |
+| `permission denied while trying to connect to the docker API` | у пользователя нет доступа к Docker: выполняйте команды `docker` через `sudo` (`PG=$(sudo docker ps …)`, а не `sudo PG=$(docker ps …)`) или добавьте пользователя в группу `docker` |
 | `OptionsValidationException ... Smtp` или `... StagingSeed` | некорректный `GMAIL_ADDRESS` или `NOTIFY_EMAIL` |
 | `Staging seed skipped: the database already contains customers` | база уже с данными; ключи — в `device-keys.txt` или через `issue-device-key`, пересоздание — 2.5 |
 | Нет строк `Staging seed` | `ASPNETCORE_ENVIRONMENT` не равен `Staging` (проверьте написание) |

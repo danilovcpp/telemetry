@@ -12,6 +12,9 @@ public static class TelemetryStatusCodes
     /// <summary>Server event: a silent device reported again.</summary>
     public const int DeviceBackOnline = 190002;
 
+    /// <summary>Server event: the device changed its notification address; the previous recipient is told.</summary>
+    public const int NotifyEmailChanged = 190003;
+
     /// <summary>190000–199999 are raised by the server only; devices sending them are rejected.</summary>
     public static bool IsReservedForServer(int statusCode) => statusCode is >= 190_000 and <= 199_999;
 }

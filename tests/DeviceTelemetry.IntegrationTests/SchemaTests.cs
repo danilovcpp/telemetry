@@ -85,6 +85,19 @@ public sealed class SchemaTests(PostgresFixture postgres)
 
         await using var other = postgres.CreateContext();
         var ex = await Assert.ThrowsAsync<UniqueConstraintViolationException>(() => TestData.SeedTemplateAsync(other, statusCode));
-        Assert.Equal("IX_Templates_StatusCode", ex.ConstraintName);
+        Assert.Equal("IX_Templates_StatusCode_Language", ex.ConstraintName);
+    }
+
+    [Fact]
+    public async Task A_status_code_has_one_template_per_language()
+    {
+        var statusCode = Random.Shared.Next(1_000_000, int.MaxValue);
+        await using var db = postgres.CreateContext();
+        await TestData.SeedTemplateAsync(db, statusCode, language: "en");
+        await TestData.SeedTemplateAsync(db, statusCode, language: "ru");
+
+        await using var other = postgres.CreateContext();
+        var ex = await Assert.ThrowsAsync<UniqueConstraintViolationException>(() => TestData.SeedTemplateAsync(other, statusCode, language: "ru"));
+        Assert.Equal("IX_Templates_StatusCode_Language", ex.ConstraintName);
     }
 }

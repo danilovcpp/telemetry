@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Telemetry;
 using DeviceTelemetry.Domain.Entities;
 
@@ -16,7 +17,9 @@ public sealed record NotificationContext(
     Guid EventId,
     DateTime OccurredAtUtc,
     DateTime ReceivedAtUtc,
-    IReadOnlyList<TelemetryChannel>? Channels = null);
+    IReadOnlyList<TelemetryChannel>? Channels = null,
+    string? DeviceTimeZone = null,
+    string? NotifyEmail = null);
 
 public sealed record RenderedEmail(string Subject, string Body);
 
@@ -27,7 +30,9 @@ public sealed record RenderedEmail(string Subject, string Body);
 /// Rendering is strict: an unknown placeholder, an unterminated or stray brace, or a missing value makes the whole
 /// render fail with a <c>template.invalid</c> error listing every problem. Nothing is silently replaced with an empty string,
 /// except the placeholders in <see cref="OptionalPlaceholders"/>, whose data devices may legitimately omit:
-/// <c>{Channels}</c> renders as <c>ch2 (130AA15P20), ch5 (130AA15P21)</c>, or as an empty string without a channel list.
+/// <c>{Channels}</c> renders as <c>ch2 (130AA15P20), ch5 (130AA15P21)</c>, or as an empty string without a channel list;
+/// <c>{NotifyEmail}</c> (the new notification address, for 190003) may be empty too.
+/// <c>{ServerTime}</c> is the server receive time in UTC; <c>{DeviceTime}</c> the event time in the device's time zone.
 /// </para>
 /// <para>
 /// Values are formatted with the invariant culture; timestamps as <c>yyyy-MM-dd HH:mm:ss UTC</c>.
@@ -42,10 +47,11 @@ public sealed class EmailTemplateRenderer
     public static IReadOnlyList<string> SupportedPlaceholders { get; } =
     [
         "DeviceId", "DeviceCode", "DeviceName", "CustomerName", "StatusCode", "EventId", "OccurredAtUtc", "ReceivedAtUtc", "Channels",
+        "ServerTime", "DeviceTime", "NotifyEmail",
     ];
 
     /// <summary>Placeholders that render as an empty string when their value is absent, instead of failing.</summary>
-    public static IReadOnlyList<string> OptionalPlaceholders { get; } = ["Channels"];
+    public static IReadOnlyList<string> OptionalPlaceholders { get; } = ["Channels", "NotifyEmail"];
 
     public Result<RenderedEmail> Render(Template template, NotificationContext context)
     {
@@ -127,6 +133,9 @@ public sealed class EmailTemplateRenderer
             "OccurredAtUtc" => FormatTimestamp(context.OccurredAtUtc),
             "ReceivedAtUtc" => FormatTimestamp(context.ReceivedAtUtc),
             "Channels" => context.Channels is null ? string.Empty : string.Join(", ", context.Channels),
+            "ServerTime" => context.ReceivedAtUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            "DeviceTime" => FormatDeviceTime(context.OccurredAtUtc, context.DeviceTimeZone),
+            "NotifyEmail" => context.NotifyEmail ?? string.Empty,
             _ => null,
         };
 
@@ -153,6 +162,13 @@ public sealed class EmailTemplateRenderer
         }
 
         return false;
+    }
+
+    /// <summary><c>2026-10-19 15:03:22 (UTC+02:00, Europe/Berlin)</c>; <c>… (UTC)</c> when the device has no time zone.</summary>
+    private static string FormatDeviceTime(DateTime occurredAtUtc, string? timeZone)
+    {
+        var (local, label) = DeviceTimeZones.ToLocal(occurredAtUtc, timeZone);
+        return $"{local.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} ({label})";
     }
 
     private static string FormatTimestamp(DateTime utc) =>

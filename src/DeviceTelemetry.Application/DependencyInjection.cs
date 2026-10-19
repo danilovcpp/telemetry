@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Notifications;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,7 @@ public static class DependencyInjection
 
         services.AddSingleton<EmailTemplateRenderer>();
         services.AddScoped<TelemetryNotifier>();
+        services.AddScoped<DeviceContactRecorder>();
         services.TryAddSingleton(TimeProvider.System);
 
         return services;

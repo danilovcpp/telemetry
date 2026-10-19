@@ -16,6 +16,7 @@ internal sealed class TelemetryEventConfiguration : IEntityTypeConfiguration<Tel
         builder.Property(e => e.Channels).HasColumnType("jsonb").Metadata.SetMaxLength(null);
         builder.Property(e => e.Source).HasConversion<string>().HasMaxLength(10);
         builder.Property(e => e.RejectedNotifyEmail).HasMaxLength(Device.NotifyEmailMaxLength);
+        builder.Property(e => e.RejectedNotifyLanguage).HasMaxLength(16);
 
         builder.HasOne(e => e.Device)
             .WithMany(d => d.Events)

@@ -13,5 +13,6 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.Property(c => c.Name).HasMaxLength(Customer.NameMaxLength).IsRequired();
         builder.Property(c => c.Email).HasMaxLength(Customer.EmailMaxLength);
+        builder.Property(c => c.Language).HasMaxLength(Template.LanguageMaxLength);
     }
 }

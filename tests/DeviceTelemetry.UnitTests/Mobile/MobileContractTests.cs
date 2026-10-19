@@ -24,8 +24,9 @@ public sealed class MobileContractTests
     [Fact]
     public void Device_details_expose_no_audit_or_secret_fields() =>
         Assert.Equal(
-            ["id", "deviceCode", "name", "customerId", "lastEventAtUtc", "lastStatusCode", "lastSeenAtUtc", "reportIntervalS", "silentSinceUtc"],
-            JsonProperties(new DeviceDetailsDto(1, "uid", "Boiler", 2, null, null, null, null, null)));
+            ["id", "deviceCode", "name", "customerId", "lastEventAtUtc", "lastStatusCode", "lastSeenAtUtc", "reportIntervalS",
+             "silentSinceUtc", "offlineAfterS", "monitoring", "timeZone", "channels"],
+            JsonProperties(new DeviceDetailsDto(1, "uid", "Boiler", 2, null, null, null, null, null, null, true, null, null)));
 
     [Fact]
     public void Device_details_never_expose_the_notify_email() =>

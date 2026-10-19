@@ -3,6 +3,8 @@
     <PropertyGroup>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
+        <!-- IANA time zones (Europe/Berlin) need ICU on Windows; the Linux container uses tzdata instead. -->
+        <InvariantGlobalization>false</InvariantGlobalization>
     </PropertyGroup>
 
     <ItemGroup>

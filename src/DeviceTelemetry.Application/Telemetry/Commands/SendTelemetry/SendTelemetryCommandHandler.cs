@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,14 +16,15 @@ using Microsoft.Extensions.Options;
 namespace DeviceTelemetry.Application.Telemetry.Commands.SendTelemetry;
 
 /// <summary>
-/// Stores a telemetry event, applies the device-reported settings (<c>notifyEmail</c>, <c>reportIntervalS</c>) and its
-/// last-contact time, ends a silence episode (raising 190002), and queues email notifications in the outbox.
-/// Everything commits in one transaction; no email is sent here.
+/// Stores a telemetry event, records the device contact and the settings sent with it (<c>notifyEmail</c>,
+/// <c>notifyLanguage</c>, <c>reportIntervalS</c>; see <see cref="DeviceContactRecorder"/>), and queues email notifications
+/// in the outbox. Everything commits in one transaction; no email is sent here.
 /// </summary>
 public sealed class SendTelemetryCommandHandler(
     IApplicationDbContext context,
     IValidator<SendTelemetryCommand> validator,
     TelemetryNotifier notifier,
+    DeviceContactRecorder contactRecorder,
     IOptions<TelemetryOptions> options,
     TimeProvider timeProvider,
     ILogger<SendTelemetryCommandHandler> logger)
@@ -41,7 +41,7 @@ public sealed class SendTelemetryCommandHandler(
         var device = await context.Devices
             .AsNoTracking()
             .Where(d => d.DeviceCode == command.DeviceId)
-            .Select(d => new DeviceInfo(d.Id, d.DeviceCode, d.Name, d.ApiKeyHash, d.NotifyEmail, d.Customer.Name, d.Customer.Email))
+            .Select(DeviceSnapshot.Projection)
             .SingleOrDefaultAsync(ct);
 
         if (device is null)
@@ -95,55 +95,18 @@ public sealed class SendTelemetryCommandHandler(
                 telemetryEvent.Id, device.DeviceCode, command.OccurredAtUtc);
         }
 
-        var notifyEmail = ResolveNotifyEmail(command.NotifyEmail, telemetryEvent, device);
-        var reportIntervalS = ResolveReportInterval(command.ReportIntervalS, telemetryEvent, device);
+        // Settings sent along with telemetry; invalid values are ignored and kept on the event for diagnostics.
+        var settings = DeviceSettingsResolver.Resolve(
+            new DeviceSettingsInput(command.NotifyEmail, command.NotifyLanguage, command.ReportIntervalS));
+        RecordRejected(settings, telemetryEvent, device);
 
         await using var transaction = await context.BeginTransactionAsync(ct);
         try
         {
-            // The first statement locks the device row until commit, so the silence monitor cannot mark the device silent
-            // while this message is in flight, and two concurrent messages cannot both end the same silence episode.
-            await context.Devices
-                .Where(d => d.Id == device.Id)
-                .ExecuteUpdateAsync(s =>
-                {
-                    s.SetProperty(d => d.LastSeenAtUtc, receivedAtUtc);
-                    if (notifyEmail.Changed)
-                        s.SetProperty(d => d.NotifyEmail, notifyEmail.Value);
-                    if (reportIntervalS is not null)
-                        s.SetProperty(d => d.ReportIntervalS, reportIntervalS);
-                }, ct);
-
-            var silentSinceUtc = await context.Devices
-                .Where(d => d.Id == device.Id)
-                .Select(d => d.SilentSinceUtc)
-                .SingleAsync(ct);
-
-            var target = new NotificationTarget(
-                device.DeviceCode,
-                device.Name,
-                device.CustomerName,
-                notifyEmail.Changed ? notifyEmail.Value : device.NotifyEmail,
-                device.CustomerEmail);
-
-            if (silentSinceUtc is not null)
-            {
-                await context.Devices
-                    .Where(d => d.Id == device.Id)
-                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.SilentSinceUtc, (DateTime?)null), ct);
-
-                var backOnline = ServerEvents.Create(
-                    device.Id, TelemetryStatusCodes.DeviceBackOnline, now, new { silentSinceUtc });
-                context.TelemetryEvents.Add(backOnline);
-                await notifier.TryQueueAsync(target, backOnline, channels: null, ct);
-
-                logger.LogInformation(
-                    "Device {DeviceCode} reports again after silence since {SilentSinceUtc:O}; event {EventId} raised",
-                    device.DeviceCode, silentSinceUtc, backOnline.Id);
-            }
+            var updated = await contactRecorder.RecordAsync(device, settings, now, ct);
 
             context.TelemetryEvents.Add(telemetryEvent);
-            var notificationQueued = await notifier.TryQueueAsync(target, telemetryEvent, command.Channels, ct);
+            var notificationQueued = await notifier.TryQueueAsync(updated.ToTarget(), telemetryEvent, command.Channels, ct);
 
             await context.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -168,43 +131,21 @@ public sealed class SendTelemetryCommandHandler(
         }
     }
 
-    /// <summary>
-    /// Decides what to do with a sent <c>notifyEmail</c>. Not sent: keep. Empty: clear. Valid: set (normalized).
-    /// Invalid: keep the stored address, accept the event and record the rejected value on it.
-    /// </summary>
-    private NotifyEmailChange ResolveNotifyEmail(string? sent, TelemetryEvent telemetryEvent, DeviceInfo device)
+    private void RecordRejected(ResolvedDeviceSettings settings, TelemetryEvent telemetryEvent, DeviceSnapshot device)
     {
-        if (sent is null)
-            return NotifyEmailChange.None;
+        if (settings.RejectedValues.TryGetValue("notifyEmail", out var email))
+            telemetryEvent.RejectedNotifyEmail = email;
+        if (settings.RejectedValues.TryGetValue("notifyLanguage", out var language))
+            telemetryEvent.RejectedNotifyLanguage = language.Length <= 16 ? language : language[..16];
+        if (settings.RejectedValues.TryGetValue("reportIntervalS", out var interval))
+            telemetryEvent.RejectedReportIntervalS = int.Parse(interval, CultureInfo.InvariantCulture);
 
-        var trimmed = sent.Trim();
-        if (trimmed.Length == 0)
-            return new NotifyEmailChange(true, null);
-
-        if (trimmed.Length <= Device.NotifyEmailMaxLength
-            && MailAddress.TryCreate(trimmed, out var address)
-            && string.Equals(address.Address, trimmed, StringComparison.Ordinal)) // a bare address, no display name
+        foreach (var (field, reason) in settings.Rejected)
         {
-            return new NotifyEmailChange(true, address.Address);
+            logger.LogWarning(
+                "Event {EventId} from device {DeviceCode}: {Field} ignored ({Reason})",
+                telemetryEvent.Id, device.DeviceCode, field, reason);
         }
-
-        telemetryEvent.RejectedNotifyEmail = trimmed.Length <= Device.NotifyEmailMaxLength ? trimmed : trimmed[..Device.NotifyEmailMaxLength];
-        logger.LogWarning(
-            "Event {EventId} from device {DeviceCode}: notifyEmail is not a valid address and was ignored",
-            telemetryEvent.Id, device.DeviceCode);
-        return NotifyEmailChange.None;
-    }
-
-    private int? ResolveReportInterval(int? sent, TelemetryEvent telemetryEvent, DeviceInfo device)
-    {
-        if (sent is null or (>= Device.MinReportIntervalS and <= Device.MaxReportIntervalS))
-            return sent;
-
-        telemetryEvent.RejectedReportIntervalS = sent;
-        logger.LogWarning(
-            "Event {EventId} from device {DeviceCode}: reportIntervalS {ReportIntervalS} is outside {Min}..{Max} and was ignored",
-            telemetryEvent.Id, device.DeviceCode, sent, Device.MinReportIntervalS, Device.MaxReportIntervalS);
-        return null;
     }
 
     private Task<StoredEvent?> FindByMessageIdAsync(int deviceId, Guid messageId, CancellationToken ct) =>
@@ -214,7 +155,7 @@ public sealed class SendTelemetryCommandHandler(
             .Select(e => new StoredEvent(e.Id, e.ReceivedAtUtc, e.ContentHash))
             .SingleOrDefaultAsync(ct);
 
-    private Result<SendTelemetryResult> ResolveDuplicate(StoredEvent existing, byte[] contentHash, DeviceInfo device)
+    private Result<SendTelemetryResult> ResolveDuplicate(StoredEvent existing, byte[] contentHash, DeviceSnapshot device)
     {
         if (existing.ContentHash is null || !CryptographicOperations.FixedTimeEquals(existing.ContentHash, contentHash))
         {
@@ -239,7 +180,7 @@ public sealed class SendTelemetryCommandHandler(
     /// <para>
     /// Compatibility: the first three lines are the original formula. Fields added later contribute only when present,
     /// so hashes of messages from older firmware, and of events stored before the change, stay the same.
-    /// <c>notifyEmail</c> and <c>reportIntervalS</c> are addressing/configuration, not content, and are never hashed.
+    /// Settings (<c>notifyEmail</c>, <c>notifyLanguage</c>, <c>reportIntervalS</c>) are not content and are never hashed.
     /// </para>
     /// </summary>
     private static byte[] ComputeContentHash(SendTelemetryCommand command, string? channelsJson)
@@ -256,13 +197,5 @@ public sealed class SendTelemetryCommandHandler(
         return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
     }
 
-    private sealed record DeviceInfo(
-        int Id, string DeviceCode, string Name, byte[]? ApiKeyHash, string? NotifyEmail, string CustomerName, string? CustomerEmail);
-
     private sealed record StoredEvent(Guid Id, DateTime ReceivedAtUtc, byte[]? ContentHash);
-
-    private readonly record struct NotifyEmailChange(bool Changed, string? Value)
-    {
-        public static readonly NotifyEmailChange None = new(false, null);
-    }
 }

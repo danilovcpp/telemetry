@@ -19,9 +19,13 @@ public sealed class SilenceMonitorOptions
     [Range(typeof(TimeSpan), "00:01:00", "1.00:00:00")]
     public TimeSpan MinThreshold { get; set; } = TimeSpan.FromMinutes(10);
 
-    public TimeSpan ThresholdFor(int reportIntervalS)
+    /// <summary>The device's explicit <c>offlineAfterS</c> if set, else max(intervals × report interval, minimum).</summary>
+    public TimeSpan ThresholdFor(int? reportIntervalS, int? offlineAfterS = null)
     {
-        var threshold = TimeSpan.FromSeconds((long)reportIntervalS * ThresholdIntervals);
+        if (offlineAfterS is { } explicitSeconds)
+            return TimeSpan.FromSeconds(explicitSeconds);
+
+        var threshold = TimeSpan.FromSeconds((long)(reportIntervalS ?? 0) * ThresholdIntervals);
         return threshold > MinThreshold ? threshold : MinThreshold;
     }
 }

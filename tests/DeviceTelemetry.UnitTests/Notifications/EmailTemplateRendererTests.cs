@@ -31,7 +31,8 @@ public sealed class EmailTemplateRendererTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(
-            $"uid-42|uid-42|Boiler #1|ACME Corp|100001|{EventId}|2026-10-16 10:30:00 UTC|2026-10-16 10:30:05 UTC|ch2 (130AA15P20)",
+            $"uid-42|uid-42|Boiler #1|ACME Corp|100001|{EventId}|2026-10-16 10:30:00 UTC|2026-10-16 10:30:05 UTC|ch2 (130AA15P20)" +
+            "|2026-10-16 10:30:05|2026-10-16 10:30:00 (UTC)|",
             result.Value.Body);
     }
 

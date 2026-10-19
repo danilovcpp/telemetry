@@ -467,7 +467,7 @@ public sealed class SendTelemetryCommandHandlerTests(PostgresFixture postgres) :
     [Fact]
     public async Task Channels_placeholder_renders_the_list_and_renders_empty_without_it()
     {
-        var device = await TestData.SeedDeviceAsync(_db, deviceName: "Котельная");
+        var device = await TestData.SeedDeviceAsync(_db, deviceName: "Boiler room");
         await SeedDefaultTemplatesAsync();
 
         var withChannels = await SendAsync(TestData.Command(
@@ -480,10 +480,10 @@ public sealed class SendTelemetryCommandHandlerTests(PostgresFixture postgres) :
         var emails = (await db.OutboxMessages.ToListAsync()).Select(m => (m.TelemetryEventId, Email: m.ReadEmail())).ToList();
         var listed = emails.Single(e => e.TelemetryEventId == withChannels.Value.EventId).Email;
         var unlisted = emails.Single(e => e.TelemetryEventId == withoutChannels.Value.EventId).Email;
-        Assert.Equal("Котельная: не отвечают каналы ch2 (130AA15P20), ch5 (130AA15P21)", listed.Subject);
-        Assert.Contains("Каналы: ch2 (130AA15P20), ch5 (130AA15P21)\n", listed.Body);
-        Assert.Equal("Котельная: не отвечают каналы", unlisted.Subject);
-        Assert.Contains("Каналы: \n", unlisted.Body);
+        Assert.Equal("Boiler room: channels not responding ch2 (130AA15P20), ch5 (130AA15P21)", listed.Subject);
+        Assert.Contains("Channels: ch2 (130AA15P20), ch5 (130AA15P21)\n", listed.Body);
+        Assert.Equal("Boiler room: channels not responding", unlisted.Subject);
+        Assert.Contains("Channels: \n", unlisted.Body);
     }
 
     [Fact]

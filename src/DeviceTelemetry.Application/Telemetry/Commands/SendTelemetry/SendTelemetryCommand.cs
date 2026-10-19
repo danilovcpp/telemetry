@@ -32,6 +32,12 @@ public sealed class SendTelemetryCommand : ICommand<SendTelemetryResult>
     /// </summary>
     public string? NotifyEmail { get; init; }
 
+    /// <summary>
+    /// Optional notification language for the device (<c>en</c>, <c>ru</c>, <c>de</c>). Same rules as
+    /// <see cref="NotifyEmail"/>: <c>null</c> = unchanged, empty = clear, unsupported = ignored and recorded. Not hashed.
+    /// </summary>
+    public string? NotifyLanguage { get; init; }
+
     /// <summary>Optional channels the event refers to (e.g. for 100003/100004). Part of the hash only when sent.</summary>
     public IReadOnlyList<TelemetryChannel>? Channels { get; init; }
 

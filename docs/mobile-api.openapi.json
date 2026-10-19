@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "DeviceTelemetry Mobile API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`."
   },
   "servers": [
@@ -343,7 +343,11 @@
           "lastStatusCode",
           "lastSeenAtUtc",
           "reportIntervalS",
-          "silentSinceUtc"
+          "silentSinceUtc",
+          "offlineAfterS",
+          "monitoring",
+          "timeZone",
+          "channels"
         ],
         "type": "object",
         "properties": {
@@ -395,6 +399,31 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "offlineAfterS": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "monitoring": {
+            "type": "boolean"
+          },
+          "timeZone": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "channels": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TelemetryChannel"
+            }
           }
         }
       },

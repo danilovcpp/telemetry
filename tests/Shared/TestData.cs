@@ -1,4 +1,5 @@
 using DeviceTelemetry.Application.Devices;
+using DeviceTelemetry.Application.Devices.Commands.UpdateDeviceSettings;
 using DeviceTelemetry.Application.Notifications;
 using DeviceTelemetry.Application.Telemetry;
 using DeviceTelemetry.Application.Telemetry.Commands.DetectSilentDevices;
@@ -19,9 +20,10 @@ public static class TestData
         string? deviceCode = null,
         string? customerEmail = "owner@example.com",
         string customerName = "ACME Corp",
-        string deviceName = "Boiler #1")
+        string deviceName = "Boiler #1",
+        string? customerLanguage = null)
     {
-        var customer = new Customer { Name = customerName, Email = customerEmail };
+        var customer = new Customer { Name = customerName, Email = customerEmail, Language = customerLanguage };
         var device = new Device
         {
             Name = deviceName,
@@ -41,9 +43,13 @@ public static class TestData
         string subject = "Device {DeviceName} reported {StatusCode}",
         string body = "Hello {CustomerName}, device {DeviceId} reported status {StatusCode} at {OccurredAtUtc}.",
         bool isActive = true,
-        bool isHtml = false)
+        bool isHtml = false,
+        string? language = null)
     {
-        var template = new Template { StatusCode = statusCode, Subject = subject, Body = body, IsActive = isActive, IsHtml = isHtml };
+        var template = new Template
+        {
+            StatusCode = statusCode, Language = language, Subject = subject, Body = body, IsActive = isActive, IsHtml = isHtml,
+        };
         db.Templates.Add(template);
         await db.SaveChangesAsync();
         return template;
@@ -52,14 +58,21 @@ public static class TestData
     public static TelemetryNotifier CreateNotifier(ApplicationDbContext db, TimeProvider time) =>
         new(db, new EmailTemplateRenderer(), time, NullLogger<TelemetryNotifier>.Instance);
 
+    public static DeviceContactRecorder CreateContactRecorder(ApplicationDbContext db, TimeProvider time) =>
+        new(db, CreateNotifier(db, time), NullLogger<DeviceContactRecorder>.Instance);
+
     public static SendTelemetryCommandHandler CreateHandler(ApplicationDbContext db, TimeProvider time) =>
         new(
             db,
             new SendTelemetryCommandValidator(Options.Create(new TelemetryOptions())),
             CreateNotifier(db, time),
+            CreateContactRecorder(db, time),
             Options.Create(new TelemetryOptions()),
             time,
             NullLogger<SendTelemetryCommandHandler>.Instance);
+
+    public static UpdateDeviceSettingsCommandHandler CreateSettingsHandler(ApplicationDbContext db, TimeProvider time) =>
+        new(db, CreateContactRecorder(db, time), time, NullLogger<UpdateDeviceSettingsCommandHandler>.Instance);
 
     public static DetectSilentDevicesCommandHandler CreateSilenceHandler(
         ApplicationDbContext db, TimeProvider time, SilenceMonitorOptions? options = null) =>
@@ -75,6 +88,7 @@ public static class TestData
         string? deviceKey = DeviceKey,
         string? notifyEmail = null,
         IReadOnlyList<TelemetryChannel>? channels = null,
+        string? notifyLanguage = null,
         int? reportIntervalS = null) => new()
     {
         DeviceId = deviceCode,
@@ -84,6 +98,7 @@ public static class TestData
         Payload = payload,
         OccurredAtUtc = occurredAtUtc,
         NotifyEmail = notifyEmail,
+        NotifyLanguage = notifyLanguage,
         Channels = channels,
         ReportIntervalS = reportIntervalS,
     };

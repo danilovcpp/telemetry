@@ -15,5 +15,8 @@ public class Customer : BaseAuditableEntity
     /// <summary>Notification address. Optional: a customer without an address simply receives no emails.</summary>
     public string? Email { get; set; }
 
+    /// <summary>Notification language (<c>en</c>, <c>ru</c>, <c>de</c>); used when the device sets none. <c>null</c>: the default language.</summary>
+    public string? Language { get; set; }
+
     public ICollection<Device> Devices { get; } = [];
 }

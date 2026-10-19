@@ -32,6 +32,13 @@ public sealed class SendTelemetryRequest : IValidatableObject
     /// </summary>
     public string? NotifyEmail { get; init; }
 
+    /// <summary>
+    /// Optional notification language for this device: <c>en</c>, <c>ru</c> or <c>de</c> (a region such as <c>de-AT</c> is
+    /// accepted). Absent or <c>null</c>: unchanged; empty: cleared (the customer's language applies). Unsupported values do
+    /// not fail the request: they are ignored and recorded on the event.
+    /// </summary>
+    public string? NotifyLanguage { get; init; }
+
     /// <summary>Optional channels the event refers to, at most 32 (<c>id</c> ≤ 16 characters, <c>name</c> ≤ 32).</summary>
     public IReadOnlyList<ChannelRequest?>? Channels { get; init; }
 

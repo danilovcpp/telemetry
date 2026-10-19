@@ -43,6 +43,9 @@ public class TelemetryEvent : BaseAuditableEntity
     /// <summary>A <c>notifyEmail</c> the device sent that was not a valid address and was therefore ignored.</summary>
     public string? RejectedNotifyEmail { get; set; }
 
+    /// <summary>A <c>notifyLanguage</c> the device sent that is not a supported language and was therefore ignored.</summary>
+    public string? RejectedNotifyLanguage { get; set; }
+
     /// <summary>A <c>reportIntervalS</c> the device sent outside the allowed range that was therefore ignored.</summary>
     public int? RejectedReportIntervalS { get; set; }
 }

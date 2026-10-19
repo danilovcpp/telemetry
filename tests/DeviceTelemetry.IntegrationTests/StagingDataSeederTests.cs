@@ -98,7 +98,7 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
         await using (var setup = PostgresFixture.CreateContext(_connectionString))
         {
             setup.Customers.Add(new Domain.Entities.Customer { Name = "Existing" });
-            setup.Templates.Add(new Domain.Entities.Template { StatusCode = 100001, Subject = "Edited by hand", Body = "x" });
+            setup.Templates.Add(new Domain.Entities.Template { StatusCode = 100001, Language = "en", Subject = "Edited by hand", Body = "x" });
             await setup.SaveChangesAsync();
         }
 
@@ -107,7 +107,50 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
         Assert.Empty(seeded); // customers exist: no new devices or keys
         await using var db = PostgresFixture.CreateContext(_connectionString);
         Assert.Equal(DefaultTemplates.All.Count, await db.Templates.CountAsync());
-        Assert.Equal("Edited by hand", (await db.Templates.SingleAsync(t => t.StatusCode == 100001)).Subject);
+        Assert.Equal("Edited by hand", (await db.Templates.SingleAsync(t => t.StatusCode == 100001 && t.Language == "en")).Subject);
+        Assert.Equal(3, await db.Templates.CountAsync(t => t.StatusCode == 100001)); // en (edited), ru, de
+    }
+
+    [Fact]
+    public async Task Sync_templates_running_while_an_instance_seeds_waits_instead_of_colliding()
+    {
+        // As on the server: `docker compose up -d` starts seeding while `sync-templates` already runs.
+        var work = Enumerable.Range(0, 6).Select(i => Task.Run(async () =>
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            if (i % 2 == 0)
+                await TemplateSynchronizer.SyncAsync(db, CancellationToken.None);
+            else
+                await new StagingDataSeeder(db, Options.Create(new StagingSeedOptions()), NullLogger<StagingDataSeeder>.Instance)
+                    .SeedAsync(CancellationToken.None);
+        }));
+
+        await Task.WhenAll(work); // no unique violation
+
+        await using var verify = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(DefaultTemplates.All.Count, await verify.Templates.CountAsync());
+    }
+
+    [Fact]
+    public async Task Sync_templates_overwrites_edited_reference_templates_and_keeps_others()
+    {
+        await using (var setup = PostgresFixture.CreateContext(_connectionString))
+        {
+            setup.Templates.AddRange(
+                new Domain.Entities.Template { StatusCode = 100001, Language = "ru", Subject = "Edited", Body = "x", IsActive = false },
+                new Domain.Entities.Template { StatusCode = 100001, Subject = "Neutral", Body = "x" },
+                new Domain.Entities.Template { StatusCode = 555, Language = "en", Subject = "Custom", Body = "x" });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var result = await TemplateSynchronizer.SyncAsync(db, CancellationToken.None);
+
+        await using var verify = PostgresFixture.CreateContext(_connectionString);
+        var ru = await verify.Templates.SingleAsync(t => t.StatusCode == 100001 && t.Language == "ru");
+        Assert.Equal(("{DeviceName}: проверка связи — сообщение получено", true), (ru.Subject, ru.IsActive));
+        Assert.Equal([(555, "en"), (100001, (string?)null)], result.Unmanaged); // ordered by status code
+        Assert.Equal(DefaultTemplates.All.Count + 2, await verify.Templates.CountAsync());
     }
 
     [Fact]

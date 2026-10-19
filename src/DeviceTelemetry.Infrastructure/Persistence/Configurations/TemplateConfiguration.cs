@@ -14,7 +14,10 @@ internal sealed class TemplateConfiguration : IEntityTypeConfiguration<Template>
         builder.Property(t => t.Subject).HasMaxLength(Template.SubjectMaxLength).IsRequired();
         builder.Property(t => t.Body).HasMaxLength(Template.BodyMaxLength).IsRequired();
 
-        // One template per status code keeps the choice of template unambiguous.
-        builder.HasIndex(t => t.StatusCode).IsUnique();
+        builder.Property(t => t.Language).HasMaxLength(Template.LanguageMaxLength);
+
+        // One template per (status code, language) keeps the choice of template unambiguous; NULLS NOT DISTINCT also
+        // allows only one language-neutral template per status code (PostgreSQL 15+).
+        builder.HasIndex(t => new { t.StatusCode, t.Language }).IsUnique().AreNullsDistinct(false);
     }
 }

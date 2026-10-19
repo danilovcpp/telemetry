@@ -9,7 +9,7 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Seeding;
 
 /// <summary>
 /// Fills an empty Staging database with test customers and devices (with API keys), and on every start adds the
-/// reference notification templates (<see cref="DefaultTemplates"/>) whose status codes are missing.
+/// reference notification templates (<see cref="DefaultTemplates"/>) whose (status code, language) is missing.
 /// Customers and devices are created once: if any customer exists they are left untouched, so restarts never duplicate
 /// data or rotate keys. Existing templates are never overwritten (use <c>sync-templates</c> for that).
 /// The plain API keys are logged because nothing else can recover them later; never call this outside Staging.
@@ -22,13 +22,12 @@ public sealed class StagingDataSeeder(
     public const int CustomerCount = 10;
     public const int DeviceCount = 50;
 
-    /// <summary>Arbitrary key for <c>pg_advisory_xact_lock</c>, so concurrently starting instances seed only once.</summary>
-    private const long AdvisoryLockKey = 0x4454_5345_4544;
 
     public async Task<IReadOnlyList<SeededDevice>> SeedAsync(CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({AdvisoryLockKey})", ct);
+        // Concurrently starting instances seed only once, and sync-templates waits for this transaction.
+        await SeedingLock.AcquireAsync(db, ct);
 
         await AddMissingTemplatesAsync(ct);
 
@@ -88,15 +87,20 @@ public sealed class StagingDataSeeder(
     /// <summary>Adds the reference templates whose status codes have no template yet; returns how many were added.</summary>
     private async Task<int> AddMissingTemplatesAsync(CancellationToken ct)
     {
-        var existing = await db.Templates.Select(t => t.StatusCode).ToListAsync(ct);
-        var missing = DefaultTemplates.All.Where(t => !existing.Contains(t.StatusCode)).Select(DefaultTemplates.Copy).ToList();
+        var existing = (await db.Templates.Select(t => new { t.StatusCode, t.Language }).ToListAsync(ct))
+            .Select(t => (t.StatusCode, t.Language))
+            .ToHashSet();
+        var missing = DefaultTemplates.All
+            .Where(t => !existing.Contains((t.StatusCode, t.Language)))
+            .Select(DefaultTemplates.Copy)
+            .ToList();
         db.Templates.AddRange(missing);
 
         if (missing.Count > 0)
         {
             logger.LogInformation(
-                "Staging: added notification templates for status codes {StatusCodes}",
-                string.Join(", ", missing.Select(t => t.StatusCode)));
+                "Staging: added notification templates {Templates}",
+                string.Join(", ", missing.GroupBy(t => t.Language).Select(g => $"{g.Key}: {string.Join(" ", g.Select(t => t.StatusCode))}")));
         }
 
         return missing.Count;

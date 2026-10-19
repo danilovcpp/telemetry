@@ -95,6 +95,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)");
 
+                    b.Property<string>("Language")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -123,6 +127,9 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<byte[]>("ApiKeyHash")
                         .HasColumnType("bytea");
 
+                    b.Property<string>("Channels")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -141,6 +148,9 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool?>("MonitoringEnabled")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -150,11 +160,22 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)");
 
+                    b.Property<string>("NotifyLanguage")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int?>("OfflineAfterS")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("ReportIntervalS")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("SilentSinceUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TimeZone")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -212,6 +233,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<string>("RejectedNotifyEmail")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)");
+
+                    b.Property<string>("RejectedNotifyLanguage")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<DateTime?>("RejectedOccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -277,6 +302,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsHtml")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Language")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
                     b.Property<int>("StatusCode")
                         .HasColumnType("integer");
 
@@ -294,8 +323,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StatusCode")
+                    b.HasIndex("StatusCode", "Language")
                         .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("StatusCode", "Language"), false);
 
                     b.ToTable("Templates", (string)null);
                 });

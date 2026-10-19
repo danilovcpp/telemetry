@@ -1,4 +1,5 @@
 using DeviceTelemetry.Application.Devices;
+using DeviceTelemetry.Application.Notifications;
 using DeviceTelemetry.Infrastructure.Persistence;
 using DeviceTelemetry.Infrastructure.Persistence.Seeding;
 using Microsoft.EntityFrameworkCore;
@@ -8,11 +9,13 @@ namespace DeviceTelemetry.Api;
 /// <summary>
 /// One-off operational commands run instead of the web host:
 /// <c>migrate</c> applies EF Core migrations; <c>issue-device-key &lt;deviceCode&gt;</c> issues a new API key for a device;
-/// <c>sync-templates</c> writes the reference notification templates, overwriting templates with the same status codes.
+/// <c>sync-templates</c> writes the reference notification templates, overwriting those with the same (status code, language);
+/// <c>set-customer-language &lt;customerId|all&gt; &lt;en|ru|de|-&gt;</c> sets or clears customers' notification language.
 /// </summary>
 internal static class AdminCommands
 {
-    public static bool IsAdminCommand(string[] args) => args is ["migrate", ..] or ["issue-device-key", ..] or ["sync-templates", ..];
+    public static bool IsAdminCommand(string[] args) =>
+        args is ["migrate", ..] or ["issue-device-key", ..] or ["sync-templates", ..] or ["set-customer-language", ..];
 
     public static async Task<int> RunAsync(IServiceProvider services, string[] args)
     {
@@ -44,32 +47,54 @@ internal static class AdminCommands
                 return 0;
 
             case ["sync-templates", ..]:
-                var templates = await db.Templates.ToDictionaryAsync(t => t.StatusCode);
-                foreach (var reference in DefaultTemplates.All)
+                var sync = await TemplateSynchronizer.SyncAsync(db, CancellationToken.None);
+                Console.WriteLine(
+                    $"Templates written for status codes {string.Join(", ", DefaultTemplates.StatusCodes)} " +
+                    $"in languages {string.Join(", ", NotificationLanguages.Supported)}.");
+
+                if (sync.Unmanaged.Count > 0)
                 {
-                    if (templates.TryGetValue(reference.StatusCode, out var template))
-                    {
-                        template.Subject = reference.Subject;
-                        template.Body = reference.Body;
-                        template.IsHtml = reference.IsHtml;
-                        template.IsActive = reference.IsActive;
-                    }
-                    else
-                    {
-                        db.Templates.Add(DefaultTemplates.Copy(reference));
-                    }
+                    Console.WriteLine("Left unchanged (not reference templates): " +
+                                      string.Join(", ", sync.Unmanaged.Select(k => $"{k.StatusCode} ({k.Language ?? "no language"})")) + ".");
+                    Console.WriteLine("Templates without a language are used only when a code has no template in the requested or default language.");
                 }
 
-                await db.SaveChangesAsync();
-                Console.WriteLine($"Templates written for status codes: {string.Join(", ", DefaultTemplates.All.Select(t => t.StatusCode))}.");
+                return 0;
 
-                var unmanaged = templates.Keys.Except(DefaultTemplates.All.Select(t => t.StatusCode)).Order().ToList();
-                if (unmanaged.Count > 0)
-                    Console.WriteLine($"Left unchanged (not reference templates): {string.Join(", ", unmanaged)}.");
+            case ["set-customer-language", var customer, var language, ..]:
+                string? value = null;
+                if (language != "-")
+                {
+                    if (!NotificationLanguages.TryNormalize(language, out var normalized))
+                    {
+                        Console.Error.WriteLine($"Unsupported language '{language}'. Use one of: {string.Join(", ", NotificationLanguages.Supported)}, or - to clear.");
+                        return 2;
+                    }
+
+                    value = normalized;
+                }
+
+                var customers = customer == "all"
+                    ? db.Customers
+                    : int.TryParse(customer, out var customerId) ? db.Customers.Where(c => c.Id == customerId) : null;
+                if (customers is null)
+                {
+                    Console.Error.WriteLine("Customer must be a numeric id or 'all'.");
+                    return 2;
+                }
+
+                var updated = await customers.ExecuteUpdateAsync(s => s.SetProperty(c => c.Language, value));
+                if (updated == 0)
+                {
+                    Console.Error.WriteLine($"Customer '{customer}' not found.");
+                    return 1;
+                }
+
+                Console.WriteLine($"Language of {updated} customer(s) set to {value ?? $"the default ({NotificationLanguages.Default})"}.");
                 return 0;
 
             default:
-                Console.Error.WriteLine("Usage: migrate | issue-device-key <deviceCode> | sync-templates");
+                Console.Error.WriteLine("Usage: migrate | issue-device-key <deviceCode> | sync-templates | set-customer-language <customerId|all> <en|ru|de|->");
                 return 2;
         }
     }
