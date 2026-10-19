@@ -2,32 +2,36 @@ using System.Globalization;
 using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
-using DeviceTelemetry.Application.Abstractions.Integrations;
+using System.Text.Json;
 using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Application.Common;
 using DeviceTelemetry.Application.Common.Exceptions;
 using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Notifications;
-using DeviceTelemetry.Application.Outbox;
 using DeviceTelemetry.Domain.Entities;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.Application.Telemetry.Commands.SendTelemetry;
 
 /// <summary>
-/// Stores a telemetry event and, when an active template exists for its status code, queues an email notification
-/// in the outbox. Both rows are written by one <c>SaveChanges</c> call, i.e. in one transaction. No email is sent here.
+/// Stores a telemetry event, applies the device-reported settings (<c>notifyEmail</c>, <c>reportIntervalS</c>) and its
+/// last-contact time, ends a silence episode (raising 190002), and queues email notifications in the outbox.
+/// Everything commits in one transaction; no email is sent here.
 /// </summary>
 public sealed class SendTelemetryCommandHandler(
     IApplicationDbContext context,
     IValidator<SendTelemetryCommand> validator,
-    EmailTemplateRenderer templateRenderer,
+    TelemetryNotifier notifier,
+    IOptions<TelemetryOptions> options,
     TimeProvider timeProvider,
     ILogger<SendTelemetryCommandHandler> logger)
     : ICommandHandler<SendTelemetryCommand, SendTelemetryResult>
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<Result<SendTelemetryResult>> HandleAsync(SendTelemetryCommand command, CancellationToken ct)
     {
         var validation = await validator.ValidateAsync(command, ct);
@@ -37,7 +41,7 @@ public sealed class SendTelemetryCommandHandler(
         var device = await context.Devices
             .AsNoTracking()
             .Where(d => d.DeviceCode == command.DeviceId)
-            .Select(d => new DeviceInfo(d.Id, d.DeviceCode, d.Name, d.ApiKeyHash, d.Customer.Name, d.Customer.Email))
+            .Select(d => new DeviceInfo(d.Id, d.DeviceCode, d.Name, d.ApiKeyHash, d.NotifyEmail, d.Customer.Name, d.Customer.Email))
             .SingleOrDefaultAsync(ct);
 
         if (device is null)
@@ -55,7 +59,8 @@ public sealed class SendTelemetryCommandHandler(
             return TelemetryErrors.DeviceAuthenticationFailed;
         }
 
-        var contentHash = command.MessageId is null ? null : ComputeContentHash(command);
+        var channelsJson = command.Channels is null ? null : JsonSerializer.Serialize(command.Channels, SerializerOptions);
+        var contentHash = command.MessageId is null ? null : ComputeContentHash(command, channelsJson);
 
         if (command.MessageId is { } messageId)
         {
@@ -76,77 +81,130 @@ public sealed class SendTelemetryCommandHandler(
             Payload = command.Payload,
             MessageId = command.MessageId,
             ContentHash = contentHash,
+            Source = TelemetryEventSource.Device,
+            Channels = channelsJson,
         };
-        context.TelemetryEvents.Add(telemetryEvent);
 
-        var notificationQueued = await TryQueueNotificationAsync(device, telemetryEvent, ct);
+        // A device clock running ahead must not cost the event: keep it with the receive time and record the device's value.
+        if (command.OccurredAtUtc > receivedAtUtc + options.Value.MaxClockSkew)
+        {
+            telemetryEvent.OccurredAtUtc = receivedAtUtc;
+            telemetryEvent.RejectedOccurredAtUtc = command.OccurredAtUtc;
+            logger.LogWarning(
+                "Event {EventId} from device {DeviceCode}: occurredAtUtc {OccurredAtUtc:O} is in the future; using receive time",
+                telemetryEvent.Id, device.DeviceCode, command.OccurredAtUtc);
+        }
 
+        var notifyEmail = ResolveNotifyEmail(command.NotifyEmail, telemetryEvent, device);
+        var reportIntervalS = ResolveReportInterval(command.ReportIntervalS, telemetryEvent, device);
+
+        await using var transaction = await context.BeginTransactionAsync(ct);
         try
         {
+            // The first statement locks the device row until commit, so the silence monitor cannot mark the device silent
+            // while this message is in flight, and two concurrent messages cannot both end the same silence episode.
+            await context.Devices
+                .Where(d => d.Id == device.Id)
+                .ExecuteUpdateAsync(s =>
+                {
+                    s.SetProperty(d => d.LastSeenAtUtc, receivedAtUtc);
+                    if (notifyEmail.Changed)
+                        s.SetProperty(d => d.NotifyEmail, notifyEmail.Value);
+                    if (reportIntervalS is not null)
+                        s.SetProperty(d => d.ReportIntervalS, reportIntervalS);
+                }, ct);
+
+            var silentSinceUtc = await context.Devices
+                .Where(d => d.Id == device.Id)
+                .Select(d => d.SilentSinceUtc)
+                .SingleAsync(ct);
+
+            var target = new NotificationTarget(
+                device.DeviceCode,
+                device.Name,
+                device.CustomerName,
+                notifyEmail.Changed ? notifyEmail.Value : device.NotifyEmail,
+                device.CustomerEmail);
+
+            if (silentSinceUtc is not null)
+            {
+                await context.Devices
+                    .Where(d => d.Id == device.Id)
+                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.SilentSinceUtc, (DateTime?)null), ct);
+
+                var backOnline = ServerEvents.Create(
+                    device.Id, TelemetryStatusCodes.DeviceBackOnline, now, new { silentSinceUtc });
+                context.TelemetryEvents.Add(backOnline);
+                await notifier.TryQueueAsync(target, backOnline, channels: null, ct);
+
+                logger.LogInformation(
+                    "Device {DeviceCode} reports again after silence since {SilentSinceUtc:O}; event {EventId} raised",
+                    device.DeviceCode, silentSinceUtc, backOnline.Id);
+            }
+
+            context.TelemetryEvents.Add(telemetryEvent);
+            var notificationQueued = await notifier.TryQueueAsync(target, telemetryEvent, command.Channels, ct);
+
             await context.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+
+            logger.LogInformation(
+                "Telemetry event {EventId} accepted from device {DeviceCode} with status {StatusCode}; notification queued: {NotificationQueued}",
+                telemetryEvent.Id, device.DeviceCode, telemetryEvent.StatusCode, notificationQueued);
+
+            return new SendTelemetryResult(telemetryEvent.Id, receivedAtUtc, IsDuplicate: false, notificationQueued);
         }
         catch (UniqueConstraintViolationException) when (command.MessageId is { } racedMessageId)
         {
             // A concurrent request with the same messageId won the race; the unique index kept a single row.
+            // The failed transaction is unusable, so roll it back before reading the winner.
+            await transaction.RollbackAsync(CancellationToken.None);
+
             var existing = await FindByMessageIdAsync(device.Id, racedMessageId, ct);
             if (existing is null)
                 throw;
 
             return ResolveDuplicate(existing, contentHash!, device);
         }
-
-        logger.LogInformation(
-            "Telemetry event {EventId} accepted from device {DeviceCode} with status {StatusCode}; notification queued: {NotificationQueued}",
-            telemetryEvent.Id, device.DeviceCode, telemetryEvent.StatusCode, notificationQueued);
-
-        return new SendTelemetryResult(telemetryEvent.Id, receivedAtUtc, IsDuplicate: false, notificationQueued);
     }
 
     /// <summary>
-    /// Adds an outbox message when the status code has an active template. Every reason for not notifying is logged;
-    /// none of them prevents the telemetry event itself from being stored.
+    /// Decides what to do with a sent <c>notifyEmail</c>. Not sent: keep. Empty: clear. Valid: set (normalized).
+    /// Invalid: keep the stored address, accept the event and record the rejected value on it.
     /// </summary>
-    private async Task<bool> TryQueueNotificationAsync(DeviceInfo device, TelemetryEvent telemetryEvent, CancellationToken ct)
+    private NotifyEmailChange ResolveNotifyEmail(string? sent, TelemetryEvent telemetryEvent, DeviceInfo device)
     {
-        var template = await context.Templates
-            .AsNoTracking()
-            .SingleOrDefaultAsync(t => t.StatusCode == telemetryEvent.StatusCode && t.IsActive, ct);
+        if (sent is null)
+            return NotifyEmailChange.None;
 
-        if (template is null)
-            return false;
+        var trimmed = sent.Trim();
+        if (trimmed.Length == 0)
+            return new NotifyEmailChange(true, null);
 
-        if (string.IsNullOrWhiteSpace(device.CustomerEmail) || !MailAddress.TryCreate(device.CustomerEmail, out _))
+        if (trimmed.Length <= Device.NotifyEmailMaxLength
+            && MailAddress.TryCreate(trimmed, out var address)
+            && string.Equals(address.Address, trimmed, StringComparison.Ordinal)) // a bare address, no display name
         {
-            logger.LogWarning(
-                "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: customer has no valid email address",
-                telemetryEvent.Id, telemetryEvent.StatusCode, device.DeviceCode);
-            return false;
+            return new NotifyEmailChange(true, address.Address);
         }
 
-        var rendered = templateRenderer.Render(
-            template,
-            new NotificationContext(
-                device.DeviceCode,
-                device.Name,
-                device.CustomerName,
-                telemetryEvent.StatusCode,
-                telemetryEvent.Id,
-                telemetryEvent.OccurredAtUtc,
-                telemetryEvent.ReceivedAtUtc));
+        telemetryEvent.RejectedNotifyEmail = trimmed.Length <= Device.NotifyEmailMaxLength ? trimmed : trimmed[..Device.NotifyEmailMaxLength];
+        logger.LogWarning(
+            "Event {EventId} from device {DeviceCode}: notifyEmail is not a valid address and was ignored",
+            telemetryEvent.Id, device.DeviceCode);
+        return NotifyEmailChange.None;
+    }
 
-        if (rendered.IsFailure)
-        {
-            logger.LogError(
-                "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: {ErrorCode} {ErrorMessage}",
-                telemetryEvent.Id, telemetryEvent.StatusCode, device.DeviceCode, rendered.Error.Code, rendered.Error.Message);
-            return false;
-        }
+    private int? ResolveReportInterval(int? sent, TelemetryEvent telemetryEvent, DeviceInfo device)
+    {
+        if (sent is null or (>= Device.MinReportIntervalS and <= Device.MaxReportIntervalS))
+            return sent;
 
-        var email = new EmailMessage(device.CustomerEmail, rendered.Value.Subject, rendered.Value.Body, template.IsHtml);
-        context.OutboxMessages.Add(OutboxMessage.ForEmail(
-            Guid.CreateVersion7(timeProvider.GetUtcNow()), email, telemetryEvent.Id, telemetryEvent.ReceivedAtUtc));
-
-        return true;
+        telemetryEvent.RejectedReportIntervalS = sent;
+        logger.LogWarning(
+            "Event {EventId} from device {DeviceCode}: reportIntervalS {ReportIntervalS} is outside {Min}..{Max} and was ignored",
+            telemetryEvent.Id, device.DeviceCode, sent, Device.MinReportIntervalS, Device.MaxReportIntervalS);
+        return null;
     }
 
     private Task<StoredEvent?> FindByMessageIdAsync(int deviceId, Guid messageId, CancellationToken ct) =>
@@ -175,10 +233,16 @@ public sealed class SendTelemetryCommandHandler(
     }
 
     /// <summary>
-    /// Hash of what the device sent: status code, the occurredAtUtc it supplied (not the server default) and the payload.
-    /// The payload is compared as normalized (minified) JSON text, so the same object with reordered keys counts as different.
+    /// Hash of what the device sent: status code, the occurredAtUtc it supplied (not the server default, and as sent even
+    /// when it was rejected as implausible), the payload, and — only when sent — the channel list.
+    /// The payload and channels are compared as normalized (minified) JSON, so reordered keys or channels count as different.
+    /// <para>
+    /// Compatibility: the first three lines are the original formula. Fields added later contribute only when present,
+    /// so hashes of messages from older firmware, and of events stored before the change, stay the same.
+    /// <c>notifyEmail</c> and <c>reportIntervalS</c> are addressing/configuration, not content, and are never hashed.
+    /// </para>
     /// </summary>
-    private static byte[] ComputeContentHash(SendTelemetryCommand command)
+    private static byte[] ComputeContentHash(SendTelemetryCommand command, string? channelsJson)
     {
         var canonical = string.Join(
             '\n',
@@ -186,11 +250,19 @@ public sealed class SendTelemetryCommandHandler(
             command.OccurredAtUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
             command.Payload ?? string.Empty);
 
+        if (channelsJson is not null)
+            canonical += "\nchannels:" + channelsJson;
+
         return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
     }
 
     private sealed record DeviceInfo(
-        int Id, string DeviceCode, string Name, byte[]? ApiKeyHash, string CustomerName, string? CustomerEmail);
+        int Id, string DeviceCode, string Name, byte[]? ApiKeyHash, string? NotifyEmail, string CustomerName, string? CustomerEmail);
 
     private sealed record StoredEvent(Guid Id, DateTime ReceivedAtUtc, byte[]? ContentHash);
+
+    private readonly record struct NotifyEmailChange(bool Changed, string? Value)
+    {
+        public static readonly NotifyEmailChange None = new(false, null);
+    }
 }

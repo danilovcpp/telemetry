@@ -30,4 +30,27 @@ public class TelemetryEvent : BaseAuditableEntity
     /// Lets a retry with the same <see cref="MessageId"/> but different content be detected.
     /// </summary>
     public byte[]? ContentHash { get; set; }
+
+    /// <summary>Who created the event. <c>null</c> on events stored before sources were recorded, which all came from devices.</summary>
+    public TelemetryEventSource? Source { get; set; }
+
+    /// <summary>Channels the event refers to, as a JSON array of <c>{"id", "name"}</c> (<c>jsonb</c>); <c>null</c> if not sent.</summary>
+    public string? Channels { get; set; }
+
+    /// <summary>The device's <c>occurredAtUtc</c> when it was implausible (too far in the future) and replaced by the receive time.</summary>
+    public DateTime? RejectedOccurredAtUtc { get; set; }
+
+    /// <summary>A <c>notifyEmail</c> the device sent that was not a valid address and was therefore ignored.</summary>
+    public string? RejectedNotifyEmail { get; set; }
+
+    /// <summary>A <c>reportIntervalS</c> the device sent outside the allowed range that was therefore ignored.</summary>
+    public int? RejectedReportIntervalS { get; set; }
+}
+
+public enum TelemetryEventSource
+{
+    Device,
+
+    /// <summary>Raised by the server itself, e.g. "device is silent" (190001).</summary>
+    Server,
 }

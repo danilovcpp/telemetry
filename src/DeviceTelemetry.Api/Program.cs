@@ -41,6 +41,10 @@ public class Program
             .Bind(builder.Configuration.GetSection(TelemetryOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        builder.Services.AddOptions<SilenceMonitorOptions>()
+            .Bind(builder.Configuration.GetSection(SilenceMonitorOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
         builder.Services.AddTelemetryRateLimiting(builder.Configuration);

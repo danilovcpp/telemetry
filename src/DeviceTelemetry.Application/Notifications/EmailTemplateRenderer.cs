@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Telemetry;
 using DeviceTelemetry.Domain.Entities;
 
 namespace DeviceTelemetry.Application.Notifications;
@@ -14,7 +15,8 @@ public sealed record NotificationContext(
     int StatusCode,
     Guid EventId,
     DateTime OccurredAtUtc,
-    DateTime ReceivedAtUtc);
+    DateTime ReceivedAtUtc,
+    IReadOnlyList<TelemetryChannel>? Channels = null);
 
 public sealed record RenderedEmail(string Subject, string Body);
 
@@ -23,7 +25,9 @@ public sealed record RenderedEmail(string Subject, string Body);
 /// <para>
 /// Syntax: <c>{Name}</c> inserts a value from <see cref="SupportedPlaceholders"/>; <c>{{</c> and <c>}}</c> produce literal braces.
 /// Rendering is strict: an unknown placeholder, an unterminated or stray brace, or a missing value makes the whole
-/// render fail with a <c>template.invalid</c> error listing every problem. Nothing is silently replaced with an empty string.
+/// render fail with a <c>template.invalid</c> error listing every problem. Nothing is silently replaced with an empty string,
+/// except the placeholders in <see cref="OptionalPlaceholders"/>, whose data devices may legitimately omit:
+/// <c>{Channels}</c> renders as <c>ch2 (130AA15P20), ch5 (130AA15P21)</c>, or as an empty string without a channel list.
 /// </para>
 /// <para>
 /// Values are formatted with the invariant culture; timestamps as <c>yyyy-MM-dd HH:mm:ss UTC</c>.
@@ -37,8 +41,11 @@ public sealed class EmailTemplateRenderer
 
     public static IReadOnlyList<string> SupportedPlaceholders { get; } =
     [
-        "DeviceId", "DeviceCode", "DeviceName", "CustomerName", "StatusCode", "EventId", "OccurredAtUtc", "ReceivedAtUtc",
+        "DeviceId", "DeviceCode", "DeviceName", "CustomerName", "StatusCode", "EventId", "OccurredAtUtc", "ReceivedAtUtc", "Channels",
     ];
+
+    /// <summary>Placeholders that render as an empty string when their value is absent, instead of failing.</summary>
+    public static IReadOnlyList<string> OptionalPlaceholders { get; } = ["Channels"];
 
     public Result<RenderedEmail> Render(Template template, NotificationContext context)
     {
@@ -92,9 +99,9 @@ public sealed class EmailTemplateRenderer
                 var name = text.AsSpan(i + 1, end - i - 1);
                 if (!TryGetValue(name, context, out var value))
                     problems.Add($"unknown placeholder '{{{name}}}' in {part}");
-                else if (string.IsNullOrWhiteSpace(value))
+                else if (string.IsNullOrWhiteSpace(value) && !IsOptional(name))
                     problems.Add($"placeholder '{{{name}}}' in {part} has no value");
-                else
+                else if (!string.IsNullOrEmpty(value))
                     result.Append(encode is null ? value : encode(value));
 
                 i = end;
@@ -119,10 +126,22 @@ public sealed class EmailTemplateRenderer
             "EventId" => context.EventId.ToString("D"),
             "OccurredAtUtc" => FormatTimestamp(context.OccurredAtUtc),
             "ReceivedAtUtc" => FormatTimestamp(context.ReceivedAtUtc),
+            "Channels" => context.Channels is null ? string.Empty : string.Join(", ", context.Channels),
             _ => null,
         };
 
         return value is not null || IsSupported(name);
+    }
+
+    private static bool IsOptional(ReadOnlySpan<char> name)
+    {
+        foreach (var optional in OptionalPlaceholders)
+        {
+            if (name.SequenceEqual(optional))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsSupported(ReadOnlySpan<char> name)

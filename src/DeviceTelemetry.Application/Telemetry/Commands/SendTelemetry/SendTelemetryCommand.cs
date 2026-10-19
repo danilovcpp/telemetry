@@ -24,6 +24,22 @@ public sealed class SendTelemetryCommand : ICommand<SendTelemetryResult>
 
     /// <summary>Optional payload as a JSON object.</summary>
     public string? Payload { get; init; }
+
+    /// <summary>
+    /// Optional notification address for the device. <c>null</c> = not sent (stored value unchanged);
+    /// empty or whitespace = clear the stored value; an invalid address is ignored and recorded on the event.
+    /// Addressing, not content: not part of the idempotency hash.
+    /// </summary>
+    public string? NotifyEmail { get; init; }
+
+    /// <summary>Optional channels the event refers to (e.g. for 100003/100004). Part of the hash only when sent.</summary>
+    public IReadOnlyList<TelemetryChannel>? Channels { get; init; }
+
+    /// <summary>
+    /// Optional regular report period in seconds; enables silence detection for the device. Outside the allowed range
+    /// it is ignored and recorded on the event. Not part of the idempotency hash.
+    /// </summary>
+    public int? ReportIntervalS { get; init; }
 }
 
 /// <param name="EventId">Identifier of the stored event (the original one for a duplicate).</param>

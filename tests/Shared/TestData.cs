@@ -1,6 +1,7 @@
 using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Notifications;
 using DeviceTelemetry.Application.Telemetry;
+using DeviceTelemetry.Application.Telemetry.Commands.DetectSilentDevices;
 using DeviceTelemetry.Application.Telemetry.Commands.SendTelemetry;
 using DeviceTelemetry.Domain.Entities;
 using DeviceTelemetry.Infrastructure.Persistence;
@@ -48,13 +49,22 @@ public static class TestData
         return template;
     }
 
+    public static TelemetryNotifier CreateNotifier(ApplicationDbContext db, TimeProvider time) =>
+        new(db, new EmailTemplateRenderer(), time, NullLogger<TelemetryNotifier>.Instance);
+
     public static SendTelemetryCommandHandler CreateHandler(ApplicationDbContext db, TimeProvider time) =>
         new(
             db,
-            new SendTelemetryCommandValidator(Options.Create(new TelemetryOptions()), time),
-            new EmailTemplateRenderer(),
+            new SendTelemetryCommandValidator(Options.Create(new TelemetryOptions())),
+            CreateNotifier(db, time),
+            Options.Create(new TelemetryOptions()),
             time,
             NullLogger<SendTelemetryCommandHandler>.Instance);
+
+    public static DetectSilentDevicesCommandHandler CreateSilenceHandler(
+        ApplicationDbContext db, TimeProvider time, SilenceMonitorOptions? options = null) =>
+        new(db, CreateNotifier(db, time), Options.Create(options ?? new SilenceMonitorOptions()), time,
+            NullLogger<DetectSilentDevicesCommandHandler>.Instance);
 
     public static SendTelemetryCommand Command(
         string deviceCode,
@@ -62,7 +72,10 @@ public static class TestData
         Guid? messageId = null,
         string? payload = null,
         DateTime? occurredAtUtc = null,
-        string? deviceKey = DeviceKey) => new()
+        string? deviceKey = DeviceKey,
+        string? notifyEmail = null,
+        IReadOnlyList<TelemetryChannel>? channels = null,
+        int? reportIntervalS = null) => new()
     {
         DeviceId = deviceCode,
         DeviceKey = deviceKey,
@@ -70,5 +83,8 @@ public static class TestData
         MessageId = messageId,
         Payload = payload,
         OccurredAtUtc = occurredAtUtc,
+        NotifyEmail = notifyEmail,
+        Channels = channels,
+        ReportIntervalS = reportIntervalS,
     };
 }

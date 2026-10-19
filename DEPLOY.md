@@ -30,7 +30,7 @@ VPS, docker-сеть infra
 
 ### 1.2. Сборка и публикация (рекомендуется: Docker не нужен)
 
-Образ собирает .NET SDK. Получается один мультиархитектурный образ для `linux/amd64` и `linux/arm64` с тегами версии (сейчас `1.2.0`) и `latest`. Нужен только .NET SDK 10.
+Образ собирает .NET SDK. Получается один мультиархитектурный образ для `linux/amd64` и `linux/arm64` с тегами версии (сейчас `1.3.0`) и `latest`. Нужен только .NET SDK 10.
 
 PowerShell:
 
@@ -48,9 +48,9 @@ DOTNET_CONTAINER_REGISTRY_UNAME=fkonstantin DOTNET_CONTAINER_REGISTRY_PWORD='<ac
   dotnet publish src/DeviceTelemetry.Api -c Release -t:PublishContainer -p:ContainerRegistry=docker.io
 ```
 
-В конце вывода должна быть строка о публикации образа `fkonstantin/telemetry:1.2.0, latest` в `docker.io`.
+В конце вывода должна быть строка о публикации образа `fkonstantin/telemetry:1.3.0, latest` в `docker.io`.
 
-**Новая версия:** поменяйте `<Version>` в `DeviceTelemetry.Api.csproj` или добавьте `-p:Version=1.2.1`. Номер версии станет тегом образа, тег `latest` перезапишется.
+**Новая версия:** поменяйте `<Version>` в `DeviceTelemetry.Api.csproj` или добавьте `-p:Version=1.3.1`. Номер версии станет тегом образа, тег `latest` перезапишется.
 
 ### 1.3. Альтернатива: через Docker (Docker Desktop или buildx)
 
@@ -58,15 +58,15 @@ DOTNET_CONTAINER_REGISTRY_UNAME=fkonstantin DOTNET_CONTAINER_REGISTRY_PWORD='<ac
 docker login -u fkonstantin                      # пароль = access token
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f src/DeviceTelemetry.Api/Dockerfile \
-  -t fkonstantin/telemetry:1.2.0 -t fkonstantin/telemetry:latest \
+  -t fkonstantin/telemetry:1.3.0 -t fkonstantin/telemetry:latest \
   --push .
 ```
 
-Если VPS только на amd64, достаточно `docker build -f src/DeviceTelemetry.Api/Dockerfile -t fkonstantin/telemetry:1.2.0 .` и затем `docker push fkonstantin/telemetry:1.2.0`.
+Если VPS только на amd64, достаточно `docker build -f src/DeviceTelemetry.Api/Dockerfile -t fkonstantin/telemetry:1.3.0 .` и затем `docker push fkonstantin/telemetry:1.3.0`.
 
 ### 1.4. Проверка
 
-На https://hub.docker.com/r/fkonstantin/telemetry/tags должны появиться теги `1.2.0` и `latest` с архитектурами `linux/amd64` и `linux/arm64`.
+На https://hub.docker.com/r/fkonstantin/telemetry/tags должны появиться теги `1.3.0` и `latest` с архитектурами `linux/amd64` и `linux/arm64`.
 
 ---
 
@@ -138,7 +138,7 @@ nano docker-compose.yml
 ```yaml
 services:
   telemetry:
-    image: fkonstantin/telemetry:1.2.0
+    image: fkonstantin/telemetry:1.3.0
     container_name: telemetry
     restart: unless-stopped
     ports:
@@ -177,7 +177,7 @@ networks:
 | `.env` | `GMAIL_ADDRESS` | ваш Gmail-адрес | обязательно |
 | `.env` | `GMAIL_APP_PASSWORD` | пароль приложения из 2.2 | обязательно |
 | `.env` | `NOTIFY_EMAIL` | ящик для писем тестовых клиентов | обязательно |
-| compose | `image` | `fkonstantin/telemetry:1.2.0` | при новой версии образа |
+| compose | `image` | `fkonstantin/telemetry:1.3.0` | при новой версии образа |
 | compose | `ports` | `8080:8080` | если порт 8080 на VPS занят (меняйте только левую часть) |
 | compose | `ASPNETCORE_ENVIRONMENT` | `Staging` | не менять: другое значение отключит seed |
 | compose | `ConnectionStrings__TelemetryDatabase` | `Host=postgres;…;Username=postgres;Password=postgres` | если сменятся имя сервиса БД, пользователь или пароль |
@@ -195,6 +195,8 @@ networks:
 | `Kestrel__Limits__MaxRequestBodySize` | `32768` | максимальный размер тела запроса |
 | `RateLimiting__Telemetry__PermitLimit` / `__Window` | `600` / `00:01:00` | лимит запросов телеметрии с одного IP |
 | `RateLimiting__Mobile__PermitLimit` / `__Window` | `120` / `00:01:00` | лимит запросов к мобильному API с одного IP |
+| `SilenceMonitor__CheckInterval` | `00:01:00` | как часто проверяются молчащие приборы |
+| `SilenceMonitor__ThresholdIntervals` / `SilenceMonitor__MinThreshold` | `3` / `00:10:00` | прибор молчит после `max(N × reportIntervalS, MinThreshold)` без сообщений |
 | `Logging__LogLevel__Default` | `Information` | уровень логов |
 
 ### 2.4. Запуск
@@ -295,7 +297,7 @@ docker exec -it <контейнер-postgres> psql -U postgres -d device_telemet
 |---|---|
 | Клиенты | `Staging Customer 01` … `10`, адреса `<NOTIFY_EMAIL с +customer01>` … `+customer10` |
 | Устройства | `stg-device-001` … `stg-device-050`; устройство N принадлежит клиенту ((N−1) mod 10) + 1 |
-| Шаблоны | `100001` — HTML-письмо об ошибке, `100002` — текстовое письмо о низком заряде |
+| Шаблоны | эталонный набор: `100000`, `100001` (проверка связи), `100003`/`100004` (каналы), `100005`–`100008`, `190001`/`190002` (молчание прибора); для `100010` письма нет |
 
 Подробное описание API (коды ответов, `messageId`, `occurredAtUtc`, `payload`) — в [README.md](README.md).
 
@@ -305,7 +307,7 @@ docker exec -it <контейнер-postgres> psql -U postgres -d device_telemet
 
 ```bash
 cd ~/telemetry
-# обновить версию: поменять тег в image: (например, 1.2.1), затем
+# обновить версию: поменять тег в image: (например, 1.3.1), затем
 docker compose pull && docker compose up -d
 docker compose logs --tail=100 telemetry
 docker compose restart telemetry
@@ -313,6 +315,22 @@ docker compose down          # остановить; данные в PostgreSQL 
 ```
 
 Миграции новых версий применяются автоматически при старте. Seed при обновлении не повторяется.
+
+### Обновление с 1.2.0 до 1.3.0
+
+Образ `1.3.0` нужно сначала собрать и опубликовать (часть 1). Затем:
+
+```bash
+cd ~/telemetry
+# image: fkonstantin/telemetry:1.3.0
+docker compose pull && docker compose up -d
+docker compose run --rm telemetry sync-templates
+```
+
+- **Миграция** добавит новые колонки (все nullable) и заполнит время последнего контакта у существующих устройств по их событиям.
+- **Недостающие шаблоны** Staging добавит сам при старте, но уже существующие не трогает. `sync-templates` нужен, чтобы `100001` получил новый текст «проверка связи»; команда перечислит шаблоны, которых нет в эталоне. На стенде, заполненном версией 1.1/1.2, это `100002` («низкий заряд»): в эталоне его нет, и письма по нему продолжат уходить. Отключить: `docker exec -it <контейнер-postgres> psql -U postgres -d device_telemetry -c 'UPDATE "Templates" SET "IsActive" = false WHERE "StatusCode" = 100002;'`.
+- **Контроль молчания** включается для устройства, как только оно пришлёт `reportIntervalS`. Прошивки без этого поля работают как раньше.
+- **Коды `190000`–`199999`** от устройств теперь отвергаются (`400`): они зарезервированы за сервером.
 
 ## Если что-то не работает
 
@@ -338,5 +356,5 @@ docker compose down          # остановить; данные в PostgreSQL 
 
 - Этот стенд — тестовый. Ключи устройств лежат в логах контейнера и в `device-keys.txt`. Не используйте Staging-окружение для реальных устройств.
 - Пароль приложения Gmail даёт полный доступ к отправке почты от вашего имени. Храните его только в `.env` (`chmod 600`), не коммитьте, а при утечке отзовите на https://myaccount.google.com/apppasswords.
-- API работает по HTTP на порту 8080, а устройства передают ключ в заголовке. Для доступа извне поставьте перед сервисом reverse proxy с HTTPS (nginx, Caddy, Traefik) и откройте наружу только его.
+- API работает по HTTP на порту 8080, а устройства передают ключ в заголовке. Для доступа извне поставьте перед сервисом reverse proxy с HTTPS (nginx, Caddy, Traefik) и откройте наружу только его. Приборы пока не умеют TLS: временное исключение «HTTP только для `POST /api/telemetry/send`», его риски, срок и пример конфигурации — в [docs/device-protocol.md, раздел 6](docs/device-protocol.md#6-временное-исключение-http-без-tls). С версии 1.3 перехваченный ключ позволяет ещё и перенаправить письма заказчика через `notifyEmail`.
 - Пароль `postgres/postgres` годится только для изолированного стенда. Не публикуйте порт 5432 контейнера БД наружу.

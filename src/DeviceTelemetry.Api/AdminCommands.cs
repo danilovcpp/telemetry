@@ -1,16 +1,18 @@
 using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Infrastructure.Persistence;
+using DeviceTelemetry.Infrastructure.Persistence.Seeding;
 using Microsoft.EntityFrameworkCore;
 
 namespace DeviceTelemetry.Api;
 
 /// <summary>
 /// One-off operational commands run instead of the web host:
-/// <c>migrate</c> applies EF Core migrations; <c>issue-device-key &lt;deviceCode&gt;</c> issues a new API key for a device.
+/// <c>migrate</c> applies EF Core migrations; <c>issue-device-key &lt;deviceCode&gt;</c> issues a new API key for a device;
+/// <c>sync-templates</c> writes the reference notification templates, overwriting templates with the same status codes.
 /// </summary>
 internal static class AdminCommands
 {
-    public static bool IsAdminCommand(string[] args) => args is ["migrate", ..] or ["issue-device-key", ..];
+    public static bool IsAdminCommand(string[] args) => args is ["migrate", ..] or ["issue-device-key", ..] or ["sync-templates", ..];
 
     public static async Task<int> RunAsync(IServiceProvider services, string[] args)
     {
@@ -41,8 +43,33 @@ internal static class AdminCommands
                 Console.WriteLine(apiKey);
                 return 0;
 
+            case ["sync-templates", ..]:
+                var templates = await db.Templates.ToDictionaryAsync(t => t.StatusCode);
+                foreach (var reference in DefaultTemplates.All)
+                {
+                    if (templates.TryGetValue(reference.StatusCode, out var template))
+                    {
+                        template.Subject = reference.Subject;
+                        template.Body = reference.Body;
+                        template.IsHtml = reference.IsHtml;
+                        template.IsActive = reference.IsActive;
+                    }
+                    else
+                    {
+                        db.Templates.Add(DefaultTemplates.Copy(reference));
+                    }
+                }
+
+                await db.SaveChangesAsync();
+                Console.WriteLine($"Templates written for status codes: {string.Join(", ", DefaultTemplates.All.Select(t => t.StatusCode))}.");
+
+                var unmanaged = templates.Keys.Except(DefaultTemplates.All.Select(t => t.StatusCode)).Order().ToList();
+                if (unmanaged.Count > 0)
+                    Console.WriteLine($"Left unchanged (not reference templates): {string.Join(", ", unmanaged)}.");
+                return 0;
+
             default:
-                Console.Error.WriteLine("Usage: migrate | issue-device-key <deviceCode>");
+                Console.Error.WriteLine("Usage: migrate | issue-device-key <deviceCode> | sync-templates");
                 return 2;
         }
     }

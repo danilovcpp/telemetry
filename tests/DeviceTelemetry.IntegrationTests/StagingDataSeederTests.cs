@@ -57,7 +57,8 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(StagingDataSeeder.CustomerCount, await db.Customers.CountAsync());
         Assert.Equal(StagingDataSeeder.DeviceCount, await db.Devices.CountAsync());
         Assert.True(await db.Customers.AllAsync(c => c.Devices.Count == StagingDataSeeder.DeviceCount / StagingDataSeeder.CustomerCount));
-        Assert.Equal(2, await db.Templates.CountAsync(t => t.IsActive));
+        Assert.Equal(DefaultTemplates.All.Count, await db.Templates.CountAsync(t => t.IsActive));
+        Assert.False(await db.Templates.AnyAsync(t => t.StatusCode == 100010)); // regular reports are never emailed
 
         var hashes = await db.Devices.ToDictionaryAsync(d => d.DeviceCode, d => d.ApiKeyHash);
         Assert.All(seeded, d => Assert.True(DeviceApiKey.Verify(d.ApiKey, hashes[d.DeviceCode])));
@@ -89,6 +90,24 @@ public sealed class StagingDataSeederTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(StagingDataSeeder.DeviceCount, await db.Devices.CountAsync());
         var device = await db.Devices.SingleAsync(d => d.DeviceCode == first[0].DeviceCode);
         Assert.True(DeviceApiKey.Verify(first[0].ApiKey, device.ApiKeyHash));
+    }
+
+    [Fact]
+    public async Task Already_seeded_database_gets_missing_templates_without_overwriting_edited_ones()
+    {
+        await using (var setup = PostgresFixture.CreateContext(_connectionString))
+        {
+            setup.Customers.Add(new Domain.Entities.Customer { Name = "Existing" });
+            setup.Templates.Add(new Domain.Entities.Template { StatusCode = 100001, Subject = "Edited by hand", Body = "x" });
+            await setup.SaveChangesAsync();
+        }
+
+        var seeded = await SeedAsync();
+
+        Assert.Empty(seeded); // customers exist: no new devices or keys
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(DefaultTemplates.All.Count, await db.Templates.CountAsync());
+        Assert.Equal("Edited by hand", (await db.Templates.SingleAsync(t => t.StatusCode == 100001)).Subject);
     }
 
     [Fact]

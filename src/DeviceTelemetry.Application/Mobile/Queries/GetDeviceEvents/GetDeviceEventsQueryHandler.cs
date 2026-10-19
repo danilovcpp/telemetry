@@ -1,5 +1,8 @@
+using System.Text.Json;
 using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Telemetry;
+using DeviceTelemetry.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
@@ -12,6 +15,8 @@ namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
 public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
     : IQueryHandler<GetDeviceEventsQuery, PagedResult<DeviceEventDto>>
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<Result<PagedResult<DeviceEventDto>>> HandleAsync(GetDeviceEventsQuery query, CancellationToken ct)
     {
         if (query.Limit is < 1 or > GetDeviceEventsQuery.MaxLimit)
@@ -43,18 +48,41 @@ public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
             .OrderByDescending(e => e.OccurredAtUtc)
             .ThenByDescending(e => e.Id)
             .Take(query.Limit + 1)
-            .Select(e => new DeviceEventDto(e.Id, e.StatusCode, e.OccurredAtUtc, e.ReceivedAtUtc, e.Payload))
+            .Select(e => new
+            {
+                e.Id,
+                e.StatusCode,
+                e.OccurredAtUtc,
+                e.ReceivedAtUtc,
+                e.Payload,
+                IsServer = e.Source == TelemetryEventSource.Server,
+                e.Channels,
+                OccurredAtRejected = e.RejectedOccurredAtUtc != null,
+            })
             .ToListAsync(ct);
 
+        // At most 32 small channel objects per event: deserializing them here keeps the response strongly typed.
+        var items = rows
+            .Select(e => new DeviceEventDto(
+                e.Id,
+                e.StatusCode,
+                e.OccurredAtUtc,
+                e.ReceivedAtUtc,
+                e.Payload,
+                e.IsServer ? "server" : "device",
+                e.Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(e.Channels, SerializerOptions),
+                e.OccurredAtRejected))
+            .ToList();
+
         // An empty page is ambiguous: no (more) events, or no such device. Only then is the device checked.
-        if (rows.Count == 0 && !await context.Devices.AnyAsync(d => d.Id == query.DeviceId, ct))
+        if (items.Count == 0 && !await context.Devices.AnyAsync(d => d.Id == query.DeviceId, ct))
             return MobileErrors.DeviceNotFound;
 
-        var hasMore = rows.Count > query.Limit;
+        var hasMore = items.Count > query.Limit;
         if (hasMore)
-            rows.RemoveAt(rows.Count - 1);
+            items.RemoveAt(items.Count - 1);
 
-        var nextCursor = hasMore ? new EventCursor(rows[^1].OccurredAtUtc, rows[^1].Id).Encode() : null;
-        return new PagedResult<DeviceEventDto>(rows, nextCursor, hasMore);
+        var nextCursor = hasMore ? new EventCursor(items[^1].OccurredAtUtc, items[^1].Id).Encode() : null;
+        return new PagedResult<DeviceEventDto>(items, nextCursor, hasMore);
     }
 }

@@ -4,6 +4,7 @@ using DeviceTelemetry.Infrastructure.Integrations.Email;
 using DeviceTelemetry.Infrastructure.Outbox;
 using DeviceTelemetry.Infrastructure.Persistence;
 using DeviceTelemetry.Infrastructure.Persistence.Seeding;
+using DeviceTelemetry.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<IOutboxStore, PostgresOutboxStore>();
         services.AddScoped<OutboxProcessor>();
         services.AddHostedService<OutboxBackgroundService>();
+        services.AddHostedService<SilenceMonitorBackgroundService>();
 
         return services;
     }

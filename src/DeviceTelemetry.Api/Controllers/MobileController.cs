@@ -4,6 +4,7 @@ using DeviceTelemetry.Application.Common;
 using DeviceTelemetry.Application.Mobile.Queries.GetCustomerDevices;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
+using DeviceTelemetry.Application.Mobile.Queries.GetDeviceState;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -71,6 +72,32 @@ public class MobileController : ControllerBase
         [FromServices] IQueryHandler<GetDeviceDetailsQuery, DeviceDetailsDto> handler)
     {
         var result = await handler.HandleAsync(new GetDeviceDetailsQuery(deviceId), HttpContext.RequestAborted);
+        return result.Match<IActionResult>(Ok, this.Problem);
+    }
+
+    /// <summary>Current state of a device.</summary>
+    /// <remarks>
+    /// The last regular report (status 100010, by device time) plus the server's liveness view. Values and the state of
+    /// each channel are in <c>lastReport.payload.values</c>; show only the channels present there (a channel removed on the
+    /// device disappears from its reports). <c>silentSinceUtc</c> is set while the device is considered silent; this is
+    /// checked only for devices that announce <c>reportIntervalS</c>.
+    ///
+    ///     GET /api/mobile/devices/15/state
+    /// </remarks>
+    /// <param name="deviceId">Internal device id, not the device code.</param>
+    /// <response code="200">The device state; <c>lastReport</c> is <c>null</c> if the device never sent a report.</response>
+    /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
+    [HttpGet("devices/{deviceId}/state")]
+    [ProducesResponseType<DeviceStateDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
+    public async Task<IActionResult> GetDeviceState(
+        int deviceId,
+        [FromServices] IQueryHandler<GetDeviceStateQuery, DeviceStateDto> handler)
+    {
+        var result = await handler.HandleAsync(new GetDeviceStateQuery(deviceId), HttpContext.RequestAborted);
         return result.Match<IActionResult>(Ok, this.Problem);
     }
 

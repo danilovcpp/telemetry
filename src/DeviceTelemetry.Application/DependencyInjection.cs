@@ -20,6 +20,7 @@ public static class DependencyInjection
         RegisterHandlers(services, assembly, typeof(IQueryHandler<,>));
 
         services.AddSingleton<EmailTemplateRenderer>();
+        services.AddScoped<TelemetryNotifier>();
         services.TryAddSingleton(TimeProvider.System);
 
         return services;

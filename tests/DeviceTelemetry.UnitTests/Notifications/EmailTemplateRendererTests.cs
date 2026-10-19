@@ -27,13 +27,52 @@ public sealed class EmailTemplateRendererTests
     {
         var body = string.Join("|", EmailTemplateRenderer.SupportedPlaceholders.Select(p => $"{{{p}}}"));
 
-        var result = _renderer.Render(Template(body: body), Context);
+        var result = _renderer.Render(Template(body: body), Context with { Channels = [new("ch2", "130AA15P20")] });
 
         Assert.True(result.IsSuccess);
         Assert.Equal(
-            $"uid-42|uid-42|Boiler #1|ACME Corp|100001|{EventId}|2026-10-16 10:30:00 UTC|2026-10-16 10:30:05 UTC",
+            $"uid-42|uid-42|Boiler #1|ACME Corp|100001|{EventId}|2026-10-16 10:30:00 UTC|2026-10-16 10:30:05 UTC|ch2 (130AA15P20)",
             result.Value.Body);
     }
+
+    [Fact]
+    public void Channels_render_as_id_and_name_list()
+    {
+        var context = Context with { Channels = [new("ch2", "130AA15P20"), new("ch5", null), new("ch7", "")] };
+
+        var result = _renderer.Render(Template(subject: "Каналы: {Channels}", body: "{Channels}"), context);
+
+        Assert.Equal("Каналы: ch2 (130AA15P20), ch5, ch7", result.Value.Subject);
+        Assert.Equal("ch2 (130AA15P20), ch5, ch7", result.Value.Body);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Missing_channels_render_empty_instead_of_failing(bool emptyList)
+    {
+        var context = Context with { Channels = emptyList ? [] : null };
+
+        var result = _renderer.Render(Template(subject: "Не отвечают каналы: {Channels}", body: "[{Channels}]"), context);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Не отвечают каналы:", result.Value.Subject);
+        Assert.Equal("[]", result.Value.Body);
+    }
+
+    [Fact]
+    public void Channel_names_are_html_encoded_in_html_bodies()
+    {
+        var context = Context with { Channels = [new("ch1", "<b>x</b>")] };
+
+        var result = _renderer.Render(Template(body: "<p>{Channels}</p>", isHtml: true), context);
+
+        Assert.Equal("<p>ch1 (&lt;b&gt;x&lt;/b&gt;)</p>", result.Value.Body);
+    }
+
+    [Fact]
+    public void Old_double_brace_syntax_is_a_literal_not_a_placeholder() =>
+        Assert.Equal("{channels}", _renderer.Render(Template(body: "{{channels}}"), Context).Value.Body);
 
     [Fact]
     public void Formatting_does_not_depend_on_current_culture()

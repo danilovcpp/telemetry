@@ -27,3 +27,20 @@ X-Device-Key: {{deviceKey}}
     "voltage": 3.3
   }
 }
+
+### 1.3: channels, device notification address and report interval
+POST {{DeviceTelemetry.Api_HostAddress}}/api/telemetry/send
+Content-Type: application/json
+X-Device-Key: {{deviceKey}}
+
+{
+  "deviceId": "uid",
+  "statusCode": 100003,
+  "messageId": "6f1c2a4e-0b7d-4c55-9a1e-3d2f8b9c0a11",
+  "channels": [ { "id": "ch2", "name": "130AA15P20" }, { "id": "ch5", "name": "130AA15P21" } ],
+  "notifyEmail": "site-7@example.org",
+  "reportIntervalS": 300
+}
+
+### Device state (mobile API)
+GET {{DeviceTelemetry.Api_HostAddress}}/api/mobile/devices/1/state

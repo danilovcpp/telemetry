@@ -9,14 +9,15 @@ dotnet build                                            # whole solution, should
 dotnet run --project src/DeviceTelemetry.Api            # http://localhost:5146; Development auto-applies migrations
 dotnet run --project src/DeviceTelemetry.Api -- migrate                      # apply migrations and exit
 dotnet run --project src/DeviceTelemetry.Api -- issue-device-key <deviceCode> # print a new device API key once
+dotnet run --project src/DeviceTelemetry.Api -- sync-templates               # overwrite reference email templates (DefaultTemplates)
 dotnet test tests/DeviceTelemetry.UnitTests
 dotnet test tests/DeviceTelemetry.IntegrationTests      # real PostgreSQL, see below
-dotnet test tests/DeviceTelemetry.UnitTests --filter "FullyQualifiedName~SendTelemetryCommandHandlerTests"
+dotnet test tests/DeviceTelemetry.IntegrationTests --filter "FullyQualifiedName~SendTelemetryCommandHandlerTests"
 dotnet tool restore && dotnet ef migrations add <Name> --project src/DeviceTelemetry.Infrastructure --output-dir Persistence/Migrations
 docker build -f src/DeviceTelemetry.Api/Dockerfile .    # repo root as build context
 ```
 
-Integration tests use `DEVICETELEMETRY_TEST_POSTGRES` (a server connection string with CREATEDB rights) if set, otherwise Testcontainers (requires Docker). Each run creates and drops its own database. Migrations are created through `DesignTimeDbContextFactory` in Infrastructure, so no database is needed for that.
+Handler, silence-monitor and mobile query tests are integration tests (real PostgreSQL): the handlers use transactions and `ExecuteUpdate`, which EF InMemory does not support, so there is no InMemory provider in the solution. Integration tests use `DEVICETELEMETRY_TEST_POSTGRES` (a server connection string with CREATEDB rights) if set, otherwise Testcontainers (requires Docker). Each run creates and drops its own database. Migrations are created through `DesignTimeDbContextFactory` in Infrastructure, so no database is needed for that.
 
 ## Build configuration
 
@@ -41,6 +42,11 @@ Clean Architecture: `Api → Application → Domain`, `Api → Infrastructure �
 - Notification problems (no template, no email, template error) are logged and must never prevent the telemetry event from being saved.
 - Idempotency relies on the unique index `(DeviceId, MessageId)` and `ContentHash`. Do not replace it with a pre-check `SELECT`.
 - Unknown devices and wrong keys deliberately return the same 401 `device.authentication_failed`; the distinction appears only in logs.
+- A 400 is final for a device, so only invalid *content* is rejected. Invalid metadata (`occurredAtUtc` in the future, `notifyEmail`, `reportIntervalS`) is ignored and kept on the event in `Rejected*` columns; the event is accepted. Keep it that way for new auxiliary fields.
+- Idempotency hash compatibility: `ComputeContentHash` keeps the original three lines; later fields (only `channels` so far) are appended only when sent, so hashes of older firmware and of events stored earlier never change. `notifyEmail`/`reportIntervalS` are never hashed.
+- Device state transitions (`LastSeenAtUtc`, `NotifyEmail`, `ReportIntervalS`, `SilentSinceUtc`) are set-based `ExecuteUpdateAsync` statements inside `IApplicationDbContext.BeginTransactionAsync`, in the same transaction as the event. The telemetry handler updates the device row first (row lock) so the silence monitor and concurrent messages cannot race. `DetectSilentDevicesCommandHandler` marks with a conditional update (`SilentSinceUtc IS NULL AND LastSeenAtUtc = <read value>`). Do not replace these with tracked-entity updates.
+- Status codes 190000–199999 are server-only (`TelemetryStatusCodes`); devices sending them get 400. Server events have `Source = Server`, no `messageId`, and go through `TelemetryNotifier` like device events. Notification recipient: `Device.NotifyEmail`, else the customer's email.
+- Email templates: reference set in `Infrastructure/Persistence/Seeding/DefaultTemplates.cs` (no template for 100010 on purpose). Placeholders are `{Name}`; `{{`/`}}` are escaped braces. `{Channels}` is the only optional placeholder (`EmailTemplateRenderer.OptionalPlaceholders`).
 - Never log `SendTelemetryCommand.DeviceKey`, `EmailMessage` contents, SMTP credentials or payloads. The command is a class rather than a record so it has no auto-generated `ToString`. The only exception is `StagingDataSeeder`: it runs only when the environment is Staging and the database is empty, and logs the generated device keys once by design.
 - The container image is built with `dotnet publish -t:PublishContainer` (settings are in `DeviceTelemetry.Api.csproj`); Docker is not required. Runtime configuration lives in `.env`, which is git-ignored; keep `.env.example` in sync when adding settings.
 - Mobile read API (`MobileController`, `Application/Mobile/Queries/*`) is deliberately `[AllowAnonymous]` for the MVP; keep that explicit. Read handlers use `AsNoTracking` + `Select` projections into DTOs, never entities. Event history uses keyset pagination on (`OccurredAtUtc` DESC, `Id` DESC), matching index `IX_TelemetryEvents_DeviceId_OccurredAtUtc_Id`. Do not project a "first related row" as an object in EF (`x.Events....Select(e => new {...}).FirstOrDefault()`): Npgsql turns it into `ROW_NUMBER()` over the whole table. Use scalar subqueries instead. `MobileQueriesTests` asserts the generated SQL.

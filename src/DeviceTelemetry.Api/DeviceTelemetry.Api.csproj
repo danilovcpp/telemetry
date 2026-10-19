@@ -13,7 +13,7 @@
 
     <!-- Container image built by `dotnet publish -t:PublishContainer` (no Docker daemon needed). Same base image as the Dockerfile. -->
     <PropertyGroup>
-        <Version>1.2.0</Version>
+        <Version>1.3.0</Version>
         <ContainerRepository>fkonstantin/telemetry</ContainerRepository>
         <ContainerImageTags>$(Version);latest</ContainerImageTags>
         <!-- amd64 and arm64 VPS hosts; restore needs both runtime identifiers. -->

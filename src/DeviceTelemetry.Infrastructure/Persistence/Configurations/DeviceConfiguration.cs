@@ -18,6 +18,8 @@ internal sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         builder.Property(d => d.Name).HasMaxLength(Device.NameMaxLength).IsRequired();
         builder.Property(d => d.DeviceCode).HasMaxLength(Device.DeviceCodeMaxLength).IsRequired();
 
+        builder.Property(d => d.NotifyEmail).HasMaxLength(Device.NotifyEmailMaxLength);
+
         builder.HasIndex(d => d.DeviceCode).IsUnique();
 
         builder.HasOne(d => d.Customer)

@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "DeviceTelemetry Mobile API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`."
   },
   "servers": [
@@ -166,6 +166,79 @@
         }
       }
     },
+    "/api/mobile/devices/{deviceId}/state": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Current state of a device.",
+        "description": "The last regular report (status 100010, by device time) plus the server's liveness view. Values and the state of\r\neach channel are in `lastReport.payload.values`; show only the channels present there (a channel removed on the\r\ndevice disappears from its reports). `silentSinceUtc` is set while the device is considered silent; this is\r\nchecked only for devices that announce `reportIntervalS`.\r\n\r\n    GET /api/mobile/devices/15/state",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The device state; `lastReport` is `null` if the device never sent a report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceStateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/mobile/devices/{deviceId}/events": {
       "get": {
         "tags": [
@@ -267,7 +340,10 @@
           "name",
           "customerId",
           "lastEventAtUtc",
-          "lastStatusCode"
+          "lastStatusCode",
+          "lastSeenAtUtc",
+          "reportIntervalS",
+          "silentSinceUtc"
         ],
         "type": "object",
         "properties": {
@@ -298,6 +374,27 @@
               "integer"
             ],
             "format": "int32"
+          },
+          "lastSeenAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "reportIntervalS": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "silentSinceUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },
@@ -307,7 +404,10 @@
           "statusCode",
           "occurredAtUtc",
           "receivedAtUtc",
-          "payload"
+          "payload",
+          "source",
+          "channels",
+          "occurredAtRejected"
         ],
         "type": "object",
         "properties": {
@@ -334,6 +434,21 @@
             ],
             "additionalProperties": {},
             "description": "Device-specific JSON object exactly as the device sent it; no fixed schema. Null when absent."
+          },
+          "source": {
+            "type": "string"
+          },
+          "channels": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TelemetryChannel"
+            }
+          },
+          "occurredAtRejected": {
+            "type": "boolean"
           }
         }
       },
@@ -341,7 +456,9 @@
         "required": [
           "id",
           "deviceCode",
-          "name"
+          "name",
+          "lastSeenAtUtc",
+          "silentSinceUtc"
         ],
         "type": "object",
         "properties": {
@@ -354,6 +471,98 @@
           },
           "name": {
             "type": "string"
+          },
+          "lastSeenAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "silentSinceUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceReportDto": {
+        "required": [
+          "eventId",
+          "occurredAtUtc",
+          "receivedAtUtc",
+          "payload"
+        ],
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receivedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {},
+            "description": "Device-specific JSON object exactly as the device sent it; no fixed schema. Null when absent."
+          }
+        }
+      },
+      "DeviceStateDto": {
+        "required": [
+          "deviceId",
+          "lastSeenAtUtc",
+          "reportIntervalS",
+          "silentSinceUtc",
+          "lastReport"
+        ],
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastSeenAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "reportIntervalS": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "silentSinceUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastReport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeviceReportDto"
+              }
+            ]
           }
         }
       },
@@ -436,6 +645,24 @@
           "traceId": {
             "type": "string",
             "description": "Request trace id; include it when reporting a problem."
+          }
+        }
+      },
+      "TelemetryChannel": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       }

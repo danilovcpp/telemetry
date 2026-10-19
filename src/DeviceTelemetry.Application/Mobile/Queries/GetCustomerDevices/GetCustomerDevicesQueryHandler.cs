@@ -18,7 +18,7 @@ public sealed class GetCustomerDevicesQueryHandler(IApplicationDbContext context
                 Devices = c.Devices
                     .OrderBy(d => d.Name)
                     .ThenBy(d => d.Id)
-                    .Select(d => new DeviceListItemDto(d.Id, d.DeviceCode, d.Name))
+                    .Select(d => new DeviceListItemDto(d.Id, d.DeviceCode, d.Name, d.LastSeenAtUtc, d.SilentSinceUtc))
                     .ToList(),
             })
             .SingleOrDefaultAsync(ct);

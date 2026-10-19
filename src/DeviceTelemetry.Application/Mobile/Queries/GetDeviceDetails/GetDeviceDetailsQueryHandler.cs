@@ -29,7 +29,10 @@ public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context)
                     .OrderByDescending(e => e.OccurredAtUtc)
                     .ThenByDescending(e => e.Id)
                     .Select(e => (int?)e.StatusCode)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                d.LastSeenAtUtc,
+                d.ReportIntervalS,
+                d.SilentSinceUtc))
             .SingleOrDefaultAsync(ct);
 
         return device is null ? MobileErrors.DeviceNotFound : device;

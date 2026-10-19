@@ -42,6 +42,9 @@ public class TelemetryController : ControllerBase
             MessageId = request.MessageId,
             OccurredAtUtc = request.GetOccurredAtUtc(),
             Payload = request.GetPayloadJson(),
+            NotifyEmail = request.NotifyEmail,
+            Channels = request.GetChannels(),
+            ReportIntervalS = request.ReportIntervalS,
         };
 
         var result = await handler.HandleAsync(command, HttpContext.RequestAborted);

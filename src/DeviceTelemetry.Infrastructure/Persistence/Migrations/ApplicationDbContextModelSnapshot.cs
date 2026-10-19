@@ -138,10 +138,23 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTime?>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NotifyEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<int?>("ReportIntervalS")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SilentSinceUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -168,6 +181,9 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Channels")
+                        .HasColumnType("jsonb");
+
                     b.Property<byte[]>("ContentHash")
                         .HasColumnType("bytea");
 
@@ -193,6 +209,20 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("ReceivedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("RejectedNotifyEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<DateTime?>("RejectedOccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RejectedReportIntervalS")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<int>("StatusCode")
                         .HasColumnType("integer");
 
@@ -214,6 +244,9 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeviceId", "OccurredAtUtc", "Id")
                         .IsDescending(false, true, true);
+
+                    b.HasIndex("DeviceId", "StatusCode", "OccurredAtUtc", "Id")
+                        .IsDescending(false, false, true, true);
 
                     b.ToTable("TelemetryEvents", (string)null);
                 });

@@ -8,8 +8,10 @@ using Microsoft.Extensions.Options;
 namespace DeviceTelemetry.Infrastructure.Persistence.Seeding;
 
 /// <summary>
-/// Fills an empty Staging database with test customers, devices (with API keys) and notification templates.
-/// Runs once: if any customer exists the database is left untouched, so restarts never duplicate data or rotate keys.
+/// Fills an empty Staging database with test customers and devices (with API keys), and on every start adds the
+/// reference notification templates (<see cref="DefaultTemplates"/>) whose status codes are missing.
+/// Customers and devices are created once: if any customer exists they are left untouched, so restarts never duplicate
+/// data or rotate keys. Existing templates are never overwritten (use <c>sync-templates</c> for that).
 /// The plain API keys are logged because nothing else can recover them later; never call this outside Staging.
 /// </summary>
 public sealed class StagingDataSeeder(
@@ -28,8 +30,12 @@ public sealed class StagingDataSeeder(
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({AdvisoryLockKey})", ct);
 
+        await AddMissingTemplatesAsync(ct);
+
         if (await db.Customers.AnyAsync(ct))
         {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             logger.LogInformation(
                 "Staging seed skipped: the database already contains customers. API keys were logged when it was first seeded; " +
                 "issue a new one with 'issue-device-key <deviceCode>' if needed");
@@ -61,18 +67,13 @@ public sealed class StagingDataSeeder(
 
         db.Customers.AddRange(customers);
 
-        var templatesAdded = !await db.Templates.AnyAsync(ct);
-        if (templatesAdded)
-            db.Templates.AddRange(StagingTemplates());
-
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         logger.LogWarning(
-            "Staging seed created {CustomerCount} customers ({FirstCustomerEmail} - {LastCustomerEmail}) and {DeviceCount} devices{Templates}. " +
+            "Staging seed created {CustomerCount} customers ({FirstCustomerEmail} - {LastCustomerEmail}) and {DeviceCount} devices. " +
             "STAGING ONLY: device API keys follow; they are not stored in plain text and will not be shown again",
-            CustomerCount, customers[0].Email, customers[^1].Email, DeviceCount,
-            templatesAdded ? " and notification templates for status codes 100001, 100002" : string.Empty);
+            CustomerCount, customers[0].Email, customers[^1].Email, DeviceCount);
 
         foreach (var device in seeded)
         {
@@ -84,22 +85,22 @@ public sealed class StagingDataSeeder(
         return seeded;
     }
 
-    private static IEnumerable<Template> StagingTemplates() =>
-    [
-        new()
+    /// <summary>Adds the reference templates whose status codes have no template yet; returns how many were added.</summary>
+    private async Task<int> AddMissingTemplatesAsync(CancellationToken ct)
+    {
+        var existing = await db.Templates.Select(t => t.StatusCode).ToListAsync(ct);
+        var missing = DefaultTemplates.All.Where(t => !existing.Contains(t.StatusCode)).Select(DefaultTemplates.Copy).ToList();
+        db.Templates.AddRange(missing);
+
+        if (missing.Count > 0)
         {
-            StatusCode = 100001,
-            Subject = "Error {StatusCode} on {DeviceName}",
-            Body = "<p>Hello {CustomerName},</p><p>device <b>{DeviceName}</b> ({DeviceId}) reported error {StatusCode} at {OccurredAtUtc}.</p><p>Event {EventId}, received {ReceivedAtUtc}.</p>",
-            IsHtml = true,
-        },
-        new()
-        {
-            StatusCode = 100002,
-            Subject = "Low battery on {DeviceName}",
-            Body = "Hello {CustomerName},\n\ndevice {DeviceName} ({DeviceId}) reported a low battery at {OccurredAtUtc}.",
-        },
-    ];
+            logger.LogInformation(
+                "Staging: added notification templates for status codes {StatusCodes}",
+                string.Join(", ", missing.Select(t => t.StatusCode)));
+        }
+
+        return missing.Count;
+    }
 }
 
 public sealed record SeededDevice(string DeviceCode, string CustomerName, string ApiKey)

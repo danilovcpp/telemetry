@@ -5,6 +5,7 @@ using DeviceTelemetry.Application.Outbox;
 using DeviceTelemetry.Domain.Common;
 using DeviceTelemetry.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace DeviceTelemetry.Infrastructure.Persistence;
@@ -17,6 +18,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Template> Templates => Set<Template>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken) =>
+        Database.BeginTransactionAsync(cancellationToken);
 
     // DbContext.SaveChangesAsync(CancellationToken), which implements IApplicationDbContext, delegates to this overload.
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)

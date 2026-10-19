@@ -16,25 +16,31 @@ public sealed class MobileContractTests
     }
 
     [Fact]
-    public void Device_list_item_exposes_only_id_code_and_name() =>
-        Assert.Equal(["id", "deviceCode", "name"], JsonProperties(new DeviceListItemDto(1, "uid", "Boiler")));
+    public void Device_list_item_exposes_identity_and_liveness_only() =>
+        Assert.Equal(
+            ["id", "deviceCode", "name", "lastSeenAtUtc", "silentSinceUtc"],
+            JsonProperties(new DeviceListItemDto(1, "uid", "Boiler", null, null)));
 
     [Fact]
     public void Device_details_expose_no_audit_or_secret_fields() =>
         Assert.Equal(
-            ["id", "deviceCode", "name", "customerId", "lastEventAtUtc", "lastStatusCode"],
-            JsonProperties(new DeviceDetailsDto(1, "uid", "Boiler", 2, null, null)));
+            ["id", "deviceCode", "name", "customerId", "lastEventAtUtc", "lastStatusCode", "lastSeenAtUtc", "reportIntervalS", "silentSinceUtc"],
+            JsonProperties(new DeviceDetailsDto(1, "uid", "Boiler", 2, null, null, null, null, null)));
+
+    [Fact]
+    public void Device_details_never_expose_the_notify_email() =>
+        Assert.DoesNotContain(typeof(DeviceDetailsDto).GetProperties(), p => p.Name.Contains("Email"));
 
     [Fact]
     public void Device_event_exposes_only_event_data() =>
         Assert.Equal(
-            ["id", "statusCode", "occurredAtUtc", "receivedAtUtc", "payload"],
-            JsonProperties(new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, null)));
+            ["id", "statusCode", "occurredAtUtc", "receivedAtUtc", "payload", "source", "channels", "occurredAtRejected"],
+            JsonProperties(new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, null, "device", null, false)));
 
     [Fact]
     public void Payload_round_trips_as_raw_json()
     {
-        var dto = new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, """{"a":[1,2],"b":{"c":null}}""");
+        var dto = new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, """{"a":[1,2],"b":{"c":null}}""", "device", null, false);
 
         var json = JsonSerializer.Serialize(dto, Web);
 
