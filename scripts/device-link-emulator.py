@@ -239,6 +239,10 @@ class Device:
 
     async def handle(self, message):
         op = message.get("op")
+        req_id = message.get("reqId")
+        if "reqId" in message and not (isinstance(req_id, str) and 0 < len(req_id) <= 16
+                                       or isinstance(req_id, int) and not isinstance(req_id, bool) and req_id >= 0):
+            return await self.send({"op": "error", "for": op, "code": "bad_request"})
         if op == "welcome":
             print(f"welcome (link {message.get('link')})")
         elif op == "live.start":

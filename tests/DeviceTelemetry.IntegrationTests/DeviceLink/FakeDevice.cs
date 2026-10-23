@@ -36,6 +36,11 @@ public sealed class FakeDevice : IAsyncDisposable
     /// <summary>Answers to <c>logs.*</c> and <c>file.read</c> carry only <c>reqId</c>, no <c>op</c>.</summary>
     public bool AnswersWithoutOp { get; set; }
 
+    /// <summary>
+    /// Requests whose <c>reqId</c> is not a string are dropped silently, as FW 3.34 did: the protocol defines it as a string.
+    /// </summary>
+    public bool StrictStringReqId { get; set; } = true;
+
     /// <summary>Error code to answer <c>live.start</c> with (e.g. <c>not_supported</c>).</summary>
     public string? LiveStartError { get; set; }
 
@@ -161,6 +166,8 @@ public sealed class FakeDevice : IAsyncDisposable
     private async Task HandleAsync(JsonObject message)
     {
         var reqId = message["reqId"]?.DeepClone();
+        if (StrictStringReqId && message.ContainsKey("reqId") && message["reqId"]?.GetValueKind() != JsonValueKind.String)
+            return;
         switch ((string?)message["op"])
         {
             case "welcome":

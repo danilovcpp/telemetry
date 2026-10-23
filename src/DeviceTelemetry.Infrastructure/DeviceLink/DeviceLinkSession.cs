@@ -79,7 +79,7 @@ public sealed class DeviceLinkErrorException(string code, int? retryAfterS)
 }
 
 /// <summary>
-/// One Device Link connection. Sends are serialized (one frame at a time); requests carry a numeric <c>reqId</c> and are
+/// One Device Link connection. Sends are serialized (one frame at a time); requests carry a <c>reqId</c> string and are
 /// matched with the answer that echoes it, whatever its <c>op</c>.
 /// </summary>
 public sealed class DeviceLinkSession : IDisposable
@@ -142,7 +142,8 @@ public sealed class DeviceLinkSession : IDisposable
 
         try
         {
-            request["reqId"] = requestId;
+            // A string, as the protocol defines it; answers may echo it as a string or as a number.
+            request["reqId"] = requestId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             await SendAsync(request, ct);
 
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, Closed);

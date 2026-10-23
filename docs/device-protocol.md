@@ -346,15 +346,15 @@ server {                                   # HTTPS: всё
 
 ### Файлы данных
 
-Запросы сервера несут числовой `reqId`; ответ прибора должен вернуть его без изменений, `op` ответа сервер не проверяет. Одновременно сервер держит не больше одного `file.read`.
+**`reqId`** — строка до 16 символов или неотрицательное целое. Сервер шлёт строку (`"7"`); прибор возвращает `reqId` того же типа и значения, что пришёл. Запрос без годного `reqId` прибор отклоняет ошибкой `bad_request` (FW 3.35; до неё такой запрос пропускался молча). `op` ответа сервер не проверяет. Одновременно сервер держит не больше одного `file.read`.
 
 | Запрос сервера | Ответ прибора |
 |---|---|
-| `{"op": "logs.months", "reqId": 1, "ch": 1}` | `{"reqId": 1, "months": ["2026-09", "2026-10"]}` |
-| `{"op": "logs.days", "reqId": 2, "ch": 1, "month": "2026-10"}` | `{"reqId": 2, "days": [{"path": "ch1/2026-10/01.TSV", "size": 3965, "closed": true}]}` |
-| `{"op": "file.read", "reqId": 3, "path": "…", "offset": 0, "length": 8192}` | `{"reqId": 3, "offset": 0, "size": 3965, "data": "<base64>", "eof": false}` |
+| `{"op": "logs.months", "reqId": "1", "ch": 1}` | `{"reqId": "1", "months": ["2026-09", "2026-10"]}` |
+| `{"op": "logs.days", "reqId": "2", "ch": 1, "month": "2026-10"}` | `{"reqId": "2", "days": [{"path": "ch1/2026-10/01.TSV", "size": 3965, "closed": true}]}` |
+| `{"op": "file.read", "reqId": "3", "path": "…", "offset": 0, "length": 8192}` | `{"reqId": "3", "offset": 0, "size": 3965, "data": "<base64>", "eof": false}` |
 
-Ошибка: `{"op": "error", "for": "file.read", "reqId": 3, "code": "not_found", "retryAfterS": 10}`.
+Ошибка: `{"op": "error", "for": "file.read", "reqId": "3", "code": "not_found", "retryAfterS": 10}`.
 
 | `code` | Что делает сервер |
 |---|---|
@@ -407,6 +407,7 @@ python scripts/device-link-emulator.py --url ws://localhost:5146/api/device/v1/l
 
 | Версия | Изменения |
 |---|---|
+| 1.6.2 | Device Link: `reqId` в запросах сервера — строка, как в задании (до 1.6.2 сервер слал число); ответы принимаются со строкой и с числом. 1.6.1: ответ без `op` сопоставляется по `reqId` |
 | 1.6.0 | Device Link v1: WebSocket `/api/device/v1/link` (`hello`/`welcome`, коды закрытия 4400/4409), живые значения (`live.start`/`live.stop`/`values`), копирование файлов данных (`logs.months`, `logs.days`, `file.read`). HTTP-протокол не менялся |
 | 1.5.0 | команда `POST /api/telemetry/settings` (имя, адрес, язык, часовой пояс, интервал, `offlineAfterS`, `monitoring`, справочник каналов); событие `190003` и письмо на прежний адрес при смене адреса; две строки времени в письмах |
 | 1.4.0 | необязательное поле `notifyLanguage`; язык писем: устройство → клиент → английский; эталонные шаблоны на en, ru, de (в том числе `100002` «низкий заряд батареи»); `set-customer-language` |
