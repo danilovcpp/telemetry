@@ -14,6 +14,8 @@ public sealed record GetDeviceDetailsQuery(int DeviceId) : IQuery<DeviceDetailsD
 /// the device is considered silent, which is only checked for devices that report <see cref="ReportIntervalS"/> or
 /// <see cref="OfflineAfterS"/> and have <see cref="Monitoring"/> on. <see cref="TimeZone"/> and <see cref="Channels"/>
 /// (the channel names) are set by the device. The notification address is deliberately not exposed (public API).
+/// <see cref="Features"/> lists the optional screens the app may offer for the device (<c>live</c>, <c>history</c>); it is
+/// always present and may be empty.
 /// </summary>
 public sealed record DeviceDetailsDto(
     int Id,
@@ -28,4 +30,5 @@ public sealed record DeviceDetailsDto(
     int? OfflineAfterS,
     bool Monitoring,
     string? TimeZone,
-    IReadOnlyList<TelemetryChannel>? Channels);
+    IReadOnlyList<TelemetryChannel>? Channels,
+    IReadOnlyList<string> Features);

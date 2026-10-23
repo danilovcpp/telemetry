@@ -58,6 +58,16 @@ public class Device : BaseAuditableEntity
     /// <summary>Channel catalog reported by the device: JSON array of <c>{"id", "name"}</c> (<c>jsonb</c>).</summary>
     public string? Channels { get; set; }
 
+    /// <summary>
+    /// Last <c>hello</c> the device sent over Device Link (<c>jsonb</c>, as received): link version, schema, firmware,
+    /// capabilities (<c>caps</c>), channels. <c>null</c> if the device never connected over the link.
+    /// </summary>
+    public string? LinkHello { get; set; }
+
+    public DateTime? LinkHelloAtUtc { get; set; }
+
+    public ICollection<DeviceLogFile> LogFiles { get; } = [];
+
     public const int MinOfflineAfterS = 600;
     public const int MaxOfflineAfterS = 604_800;
     public const int TimeZoneMaxLength = 64;

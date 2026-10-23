@@ -50,7 +50,7 @@ X-Device-Key: dtk_...
 
 ## Мобильный API (чтение)
 
-Спецификация для разработчиков мобильного приложения — [docs/mobile-api.md](docs/mobile-api.md), OpenAPI — [docs/mobile-api.openapi.json](docs/mobile-api.openapi.json). Ниже — краткая сводка.
+Задание для разработчика мобильного приложения — [docs/mobile-app-integration.md](docs/mobile-app-integration.md); справочник API — [docs/mobile-api.md](docs/mobile-api.md), OpenAPI — [docs/mobile-api.openapi.json](docs/mobile-api.openapi.json). Ниже — краткая сводка.
 
 > **Временно публичный (MVP).** Endpoint-ы `/api/mobile/*` работают без аутентификации и явно помечены `[AllowAnonymous]`. `customerId` и `deviceId` в URL не доказывают права доступа: любой, кто достучится до сервиса, может прочитать устройства и историю любого клиента, перебирая числовые id. Перебор только замедляет лимит запросов с одного IP (`RateLimiting:Mobile`, по умолчанию 120 в минуту). До публичного production-запуска нужны аутентификация пользователя и проверка, что запрошенный клиент или устройство принадлежат ему.
 
@@ -61,6 +61,9 @@ X-Device-Key: dtk_...
 | `GET /api/mobile/customers/{customerId}/devices` | устройства клиента `[{id, deviceCode, name}]`, сортировка по `name`, затем по `id`; клиент без устройств — `[]` | 404 `customer.not_found` |
 | `GET /api/mobile/devices/{deviceId}` | `{id, deviceCode, name, customerId, lastEventAtUtc, lastStatusCode}` | 404 `device.not_found` |
 | `GET /api/mobile/devices/{deviceId}/events?limit=&cursor=` | страница `{items, nextCursor, hasMore}` | 400 `pagination.invalid_limit` / `pagination.invalid_cursor`, 404 `device.not_found` |
+| WebSocket `GET /api/mobile/devices/{deviceId}/live` | кадры `status` и `values` (живые значения через Device Link) | 404 `feature.not_available`, 429 |
+| `GET /api/mobile/devices/{deviceId}/logs?ch=&month=` | `{months}` или `{days:[{path,size,complete}]}` | 400 `logs.invalid_*`, 404 `feature.not_available` / `log.not_found` |
+| `GET`/`HEAD /api/mobile/devices/{deviceId}/data/{path}` | байты копии файла, `Range`/`ETag` | 404, 416, 503 `sync.pending` / `device.offline` |
 
 **История событий** сортируется по `occurredAtUtc` по убыванию, затем по `id` по убыванию. `limit` — от 1 до 100, по умолчанию 20; значение вне диапазона даёт 400, а не тихую подрезку. Первая страница запрашивается без `cursor`. Пока `hasMore = true`, передавайте полученный `nextCursor` без изменений. Курсор непрозрачный: это позиция последнего события страницы (`occurredAtUtc`, `id`), поэтому события с одинаковым временем не теряются и не повторяются. Используется keyset-пагинация, а не `OFFSET`: стоимость страницы не растёт с глубиной. `payload` отдаётся JSON-объектом в том виде, в каком его прислало устройство, или `null`.
 
@@ -85,6 +88,12 @@ GET /api/mobile/devices/15/events?limit=2
 **Карточка устройства.** `lastEventAtUtc` и `lastStatusCode` берутся из самого позднего события по времени устройства (`occurredAtUtc`). Это последний **известный** статус, а не гарантированное текущее состояние: heartbeat-контракта нет, а событие, буферизованное устройством и пришедшее позже, на карточку не влияет. Если событий нет, оба поля равны `null`.
 
 **Список устройств не пагинируется:** устройства заводятся вручную, и у клиента их немного. Если это изменится, пагинацию нужно добавить так же, через курсор.
+
+## Device Link (живые значения и файлы данных)
+
+Приборы SG Manager держат WebSocket `/api/device/v1/link` (заголовки `X-Device-Id`, `X-Device-Key`). Через него сервер просит живые значения для мобильных зрителей (`LiveHub`: один поток прибора на всех зрителей, продление аренды каждые 30 с, `live.stop` через 10 с после ухода последнего) и копирует файлы данных (`LogSynchronizer`: при подключении и каждые 5 минут, первый раз — полностью, дальше — хвосты; файл, который ждёт пользователь, — вне очереди). Копии лежат в `Storage:DataRoot/<deviceId>/<path>`, метаданные — в `DeviceLogFiles`. Соединения хранятся в памяти процесса: сервис рассчитан на один экземпляр. Протокол — [docs/device-protocol.md, раздел 7](docs/device-protocol.md#7-device-link-v1-16); эмулятор прибора — `scripts/device-link-emulator.py`.
+
+Функции выключены по умолчанию и включаются только в Development и Staging: мобильный API пока без аутентификации. В production `features` в карточке пустой, а маршруты live/logs/data отвечают `404 feature.not_available`.
 
 ## Шаблоны писем
 
@@ -124,6 +133,11 @@ dotnet run --project src/DeviceTelemetry.Api -- issue-device-key <deviceCode>
 | `RateLimiting:Mobile` | `PermitLimit` (120), `Window` (1 мин) — мобильный API, на IP |
 | `SilenceMonitor` | `CheckInterval` (1 мин), `ThresholdIntervals` (3), `MinThreshold` (10 мин) — контроль молчания |
 | `StagingSeed` | `RecipientEmail` — ящик для писем тестовых клиентов (только Staging) |
+| `DeviceLink` | `Enabled` (false), `PingInterval` (30 с), `PongTimeout` (60 с), `HelloTimeout` (30 с) |
+| `MobileApi` | `LiveEnabled`, `HistoryEnabled` (false; true в Development и Staging) |
+| `Live` | `PeriodMs` (1000), `StopDelayS` (10), `RenewIntervalS` (30), `MaxViewersPerIp` (4), `MaxViewersPerDevice` (20) |
+| `Sync` | `IntervalS` (300), `BackfillPauseMs` (250), `LivePauseMs` (1000), `ReadLength` (8192), `RequestTimeout` (30 с) |
+| `Storage` | `DataRoot` (`data`; в контейнере `/data`) — копии файлов данных |
 | `Kestrel:Limits:MaxRequestBodySize` | максимальный размер тела запроса |
 
 Настройки проверяются при запуске: без SMTP-хоста или корректного `FromEmail` приложение не стартует. Секреты в репозиторий не кладутся. Для локальной разработки используйте user secrets:

@@ -2,8 +2,8 @@
   "openapi": "3.1.1",
   "info": {
     "title": "DeviceTelemetry Mobile API",
-    "version": "1.2.0",
-    "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`."
+    "version": "1.3.0",
+    "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`.\n\n**Live values** are a WebSocket, `GET /api/mobile/devices/{deviceId}/live`, which OpenAPI cannot describe: see docs/mobile-api.md (frames `status` and `values`). Offer it only when the device card's `features` contains `live`; `logs` and `data` need `history`. Live values and data files come from the devices over Device Link (`/api/device/v1/link`, not part of this API)."
   },
   "servers": [
     {
@@ -329,6 +329,317 @@
           }
         }
       }
+    },
+    "/api/mobile/devices/{deviceId}/logs": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Stored data: months or daily files of one channel.",
+        "description": "Data files copied from the device (feature `history`). Without `month`: the months that have files, ascending.\r\nWith `month`: the daily files of that month, ascending by path. `size` is what the server holds now;\r\n`complete` means the day is closed and fully copied, so the file will not change any more. Channel 0 is the\r\nsummary file of all channels. Served from the server copies, whether or not the device is online.\r\n\r\n    GET /api/mobile/devices/15/logs?ch=1\r\n    GET /api/mobile/devices/15/logs?ch=1&amp;month=2026-10",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "ch",
+            "in": "query",
+            "description": "Channel number; 0 = summary file.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "description": "Month `YYYY-MM`; omit to list months.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{\"months\":[…]}` without `month`, `{\"days\":[…]}` with it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLogsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`ch` missing or not a number (`logs.invalid_channel`), malformed `month` (`logs.invalid_month`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`), has no `history` (`feature.not_available`), or no files in that month (`log.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/devices/{deviceId}/data/{path}": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Stored data: the bytes of one daily file.",
+        "description": "The server copy as it is (tab-separated, as written by the device; no charset is declared). Pass `path` from\r\nthe day list URL-encoded as one segment. Supports `HEAD`, `Range` (206; 416 outside the copy),\r\n`If-None-Match` and `If-Range`; the `ETag` changes whenever the copy grows or is re-read. While a\r\nday is not `complete` the file can grow: request the tail with `Range: bytes=&lt;size&gt;-`.\r\n\r\n    GET /api/mobile/devices/15/data/LOG%2FCH1%2F2026-10%2F23.TSV",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "File path from the day list, URL-encoded.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole copy.",
+            "content": {
+              "text/tab-separated-values": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range.",
+            "content": {
+              "text/tab-separated-values": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`), has no `history` (`feature.not_available`), or no such file (`log.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is outside the copy.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not copied yet: being copied now, retry after `Retry-After` seconds (`sync.pending`), or the device is offline (`device.offline`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Stored data: the bytes of one daily file.",
+        "description": "The server copy as it is (tab-separated, as written by the device; no charset is declared). Pass `path` from\r\nthe day list URL-encoded as one segment. Supports `HEAD`, `Range` (206; 416 outside the copy),\r\n`If-None-Match` and `If-Range`; the `ETag` changes whenever the copy grows or is re-read. While a\r\nday is not `complete` the file can grow: request the tail with `Range: bytes=&lt;size&gt;-`.\r\n\r\n    GET /api/mobile/devices/15/data/LOG%2FCH1%2F2026-10%2F23.TSV",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "File path from the day list, URL-encoded.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole copy.",
+            "content": {
+              "text/tab-separated-values": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range.",
+            "content": {
+              "text/tab-separated-values": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`), has no `history` (`feature.not_available`), or no such file (`log.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is outside the copy.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not copied yet: being copied now, retry after `Retry-After` seconds (`sync.pending`), or the device is offline (`device.offline`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -347,7 +658,8 @@
           "offlineAfterS",
           "monitoring",
           "timeZone",
-          "channels"
+          "channels",
+          "features"
         ],
         "type": "object",
         "properties": {
@@ -423,6 +735,12 @@
             ],
             "items": {
               "$ref": "#/components/schemas/TelemetryChannel"
+            }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }
@@ -516,6 +834,52 @@
             "format": "date-time"
           }
         }
+      },
+      "DeviceLogDayDto": {
+        "required": [
+          "path",
+          "size",
+          "complete"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DeviceLogsResponse": {
+        "type": "object",
+        "properties": {
+          "months": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Months with files, `YYYY-MM`, ascending."
+          },
+          "days": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DeviceLogDayDto"
+            },
+            "description": "Daily files of the month, ascending by path."
+          }
+        },
+        "description": "Exactly one of `months` (no `month` requested) and `days` is present."
       },
       "DeviceReportDto": {
         "required": [
@@ -676,6 +1040,10 @@
             "description": "Request trace id; include it when reporting a problem."
           }
         }
+      },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
       },
       "TelemetryChannel": {
         "required": [

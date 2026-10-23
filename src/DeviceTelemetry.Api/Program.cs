@@ -79,8 +79,10 @@ public class Program
             app.MapOpenApi();
         }
 
+        app.UseWebSockets();
         app.UseRateLimiter();
         app.MapControllers();
+        app.MapDeviceLink();
 
         await app.RunAsync();
         return 0;

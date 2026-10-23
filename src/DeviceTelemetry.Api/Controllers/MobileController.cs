@@ -1,13 +1,19 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Text.Json.Serialization;
 using DeviceTelemetry.Api.Http;
+using DeviceTelemetry.Application.Abstractions.DeviceLink;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Mobile;
 using DeviceTelemetry.Application.Mobile.Queries.GetCustomerDevices;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
+using DeviceTelemetry.Application.Mobile.Queries.GetDeviceLogs;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceState;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Net.Http.Headers;
 
 namespace DeviceTelemetry.Api.Controllers;
 
@@ -132,4 +138,130 @@ public class MobileController : ControllerBase
         var result = await handler.HandleAsync(query, HttpContext.RequestAborted);
         return result.Match<IActionResult>(Ok, this.Problem);
     }
+
+    /// <summary>Stored data: months or daily files of one channel.</summary>
+    /// <remarks>
+    /// Data files copied from the device (feature <c>history</c>). Without <c>month</c>: the months that have files, ascending.
+    /// With <c>month</c>: the daily files of that month, ascending by path. <c>size</c> is what the server holds now;
+    /// <c>complete</c> means the day is closed and fully copied, so the file will not change any more. Channel 0 is the
+    /// summary file of all channels. Served from the server copies, whether or not the device is online.
+    ///
+    ///     GET /api/mobile/devices/15/logs?ch=1
+    ///     GET /api/mobile/devices/15/logs?ch=1&amp;month=2026-10
+    /// </remarks>
+    /// <param name="deviceId">Internal device id, not the device code.</param>
+    /// <param name="ch">Channel number; 0 = summary file.</param>
+    /// <param name="month">Month <c>YYYY-MM</c>; omit to list months.</param>
+    /// <response code="200"><c>{"months":[…]}</c> without <c>month</c>, <c>{"days":[…]}</c> with it.</response>
+    /// <response code="400"><c>ch</c> missing or not a number (<c>logs.invalid_channel</c>), malformed <c>month</c> (<c>logs.invalid_month</c>).</response>
+    /// <response code="404">The device does not exist (<c>device.not_found</c>), has no <c>history</c> (<c>feature.not_available</c>), or no files in that month (<c>log.not_found</c>).</response>
+    [HttpGet("devices/{deviceId}/logs")]
+    [ProducesResponseType<DeviceLogsResponse>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
+    public async Task<IActionResult> GetDeviceLogs(
+        int deviceId,
+        [FromQuery] string? ch,
+        [FromQuery] string? month,
+        [FromServices] IQueryHandler<GetDeviceLogMonthsQuery, DeviceLogMonthsDto> monthsHandler,
+        [FromServices] IQueryHandler<GetDeviceLogDaysQuery, DeviceLogDaysDto> daysHandler)
+    {
+        // Parsed by hand so that a bad value gets the usual problem body with a code.
+        if (!int.TryParse(ch, NumberStyles.None, CultureInfo.InvariantCulture, out var channel))
+            return this.Problem(MobileErrors.InvalidChannel);
+
+        if (month is null)
+        {
+            var months = await monthsHandler.HandleAsync(new GetDeviceLogMonthsQuery(deviceId, channel), HttpContext.RequestAborted);
+            return months.Match<IActionResult>(m => Ok(new DeviceLogsResponse { Months = m.Months }), this.Problem);
+        }
+
+        var days = await daysHandler.HandleAsync(new GetDeviceLogDaysQuery(deviceId, channel, month), HttpContext.RequestAborted);
+        return days.Match<IActionResult>(d => Ok(new DeviceLogsResponse { Days = d.Days }), this.Problem);
+    }
+
+    /// <summary>Stored data: the bytes of one daily file.</summary>
+    /// <remarks>
+    /// The server copy as it is (tab-separated, as written by the device; no charset is declared). Pass <c>path</c> from
+    /// the day list URL-encoded as one segment. Supports <c>HEAD</c>, <c>Range</c> (206; 416 outside the copy),
+    /// <c>If-None-Match</c> and <c>If-Range</c>; the <c>ETag</c> changes whenever the copy grows or is re-read. While a
+    /// day is not <c>complete</c> the file can grow: request the tail with <c>Range: bytes=&lt;size&gt;-</c>.
+    ///
+    ///     GET /api/mobile/devices/15/data/LOG%2FCH1%2F2026-10%2F23.TSV
+    /// </remarks>
+    /// <param name="deviceId">Internal device id, not the device code.</param>
+    /// <param name="path">File path from the day list, URL-encoded.</param>
+    /// <response code="200">The whole copy.</response>
+    /// <response code="206">The requested range.</response>
+    /// <response code="404">The device does not exist (<c>device.not_found</c>), has no <c>history</c> (<c>feature.not_available</c>), or no such file (<c>log.not_found</c>).</response>
+    /// <response code="416">The range is outside the copy.</response>
+    /// <response code="503">Not copied yet: being copied now, retry after <c>Retry-After</c> seconds (<c>sync.pending</c>), or the device is offline (<c>device.offline</c>).</response>
+    [HttpGet("devices/{deviceId}/data/{**path}")]
+    [HttpHead("devices/{deviceId}/data/{**path}")]
+    [ProducesResponseType<Stream>(StatusCodes.Status200OK, "text/tab-separated-values")]
+    [ProducesResponseType<Stream>(StatusCodes.Status206PartialContent, "text/tab-separated-values")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
+    public async Task<IActionResult> GetDeviceData(
+        int deviceId,
+        string path,
+        [FromServices] IQueryHandler<GetDeviceLogFileQuery, LogFileAccess> handler,
+        [FromServices] ILogFileStorage storage,
+        [FromServices] ILogger<MobileController> logger)
+    {
+        // Routing keeps %2F encoded inside a segment; the device path is only compared with known paths.
+        var devicePath = Uri.UnescapeDataString(path);
+        var result = await handler.HandleAsync(new GetDeviceLogFileQuery(deviceId, devicePath), HttpContext.RequestAborted);
+        if (result.IsFailure)
+            return this.Problem(result.Error);
+
+        var access = result.Value;
+        switch (access.Availability)
+        {
+            case LogFileAvailability.Pending:
+                Response.Headers.RetryAfter = access.RetryAfterS!.Value.ToString(CultureInfo.InvariantCulture);
+                return ServiceUnavailable("sync.pending", "The file is being copied from the device. Retry after the number of seconds in the Retry-After header.");
+
+            case LogFileAvailability.Offline:
+                return ServiceUnavailable("device.offline", "The file has not been copied yet and the device is offline.");
+        }
+
+        var stream = storage.OpenRead(deviceId, access.Path, access.StoredSize);
+        if (stream is null)
+        {
+            logger.LogError("Device {DeviceId}: copy of a listed file is missing on disk", deviceId);
+            return this.Problem(MobileErrors.LogNotFound);
+        }
+
+        return File(
+            stream,
+            "text/tab-separated-values",
+            access.LastModifiedUtc is { } modified ? new DateTimeOffset(modified, TimeSpan.Zero) : null,
+            new EntityTagHeaderValue(access.ETag),
+            enableRangeProcessing: true);
+    }
+
+    private ObjectResult ServiceUnavailable(string code, string detail)
+    {
+        var problem = ProblemDetailsFactory.CreateProblemDetails(HttpContext, StatusCodes.Status503ServiceUnavailable, detail: detail);
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem) { StatusCode = StatusCodes.Status503ServiceUnavailable };
+    }
+}
+
+/// <summary>Exactly one of <c>months</c> (no <c>month</c> requested) and <c>days</c> is present.</summary>
+public sealed class DeviceLogsResponse
+{
+    /// <summary>Months with files, <c>YYYY-MM</c>, ascending.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Months { get; init; }
+
+    /// <summary>Daily files of the month, ascending by path.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DeviceLogDayDto>? Days { get; init; }
 }

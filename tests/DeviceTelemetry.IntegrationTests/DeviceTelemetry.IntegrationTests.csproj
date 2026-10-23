@@ -9,6 +9,7 @@
 
     <ItemGroup>
         <PackageReference Include="coverlet.collector" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
         <PackageReference Include="Moq" />
         <PackageReference Include="Testcontainers.PostgreSql" />
@@ -23,6 +24,8 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\DeviceTelemetry.Infrastructure\DeviceTelemetry.Infrastructure.csproj" />
+        <!-- End-to-end Device Link and mobile tests through WebApplicationFactory. -->
+        <ProjectReference Include="..\..\src\DeviceTelemetry.Api\DeviceTelemetry.Api.csproj" />
     </ItemGroup>
 
 </Project>

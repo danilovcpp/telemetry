@@ -22,6 +22,7 @@ internal sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         builder.Property(d => d.NotifyLanguage).HasMaxLength(Template.LanguageMaxLength);
         builder.Property(d => d.TimeZone).HasMaxLength(Device.TimeZoneMaxLength);
         builder.Property(d => d.Channels).HasColumnType("jsonb").Metadata.SetMaxLength(null);
+        builder.Property(d => d.LinkHello).HasColumnType("jsonb").Metadata.SetMaxLength(null);
 
         builder.HasIndex(d => d.DeviceCode).IsUnique();
 

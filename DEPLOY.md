@@ -316,6 +316,35 @@ docker compose down          # остановить; данные в PostgreSQL 
 
 Миграции новых версий применяются автоматически при старте. Seed при обновлении не повторяется.
 
+### Обновление до 1.6.0 (Device Link: живые значения и файлы данных)
+
+```bash
+cd <папка проекта>
+sudo mkdir -p data && sudo chown 1654:1654 data      # копии файлов приборов; 1654 — пользователь app в образе
+sudo sed -i -E 's|fkonstantin/telemetry:[0-9.]+|fkonstantin/telemetry:1.6.0|' docker-compose.yml
+```
+
+В `docker-compose.yml` у сервиса `telemetry` добавьте том и путь хранения:
+
+```yaml
+    volumes:
+      - ./data:/data
+    environment:
+      # … прежние переменные …
+      Storage__DataRoot: "/data"
+```
+
+```bash
+sudo docker compose pull && sudo docker compose up -d
+sudo docker compose logs -f telemetry | grep -m1 "Now listening"   # дождаться старта
+```
+
+- Миграция создаст таблицу `DeviceLogFiles` и две nullable-колонки прибора (`LinkHello`, `LinkHelloAtUtc`).
+- В Staging Device Link, live и сохранённые данные включены (`appsettings.Staging.json`). В Production они выключены, пока у мобильного API нет аутентификации; не включайте `MobileApi__LiveEnabled`/`MobileApi__HistoryEnabled` там.
+- Прибор подключается к `ws://<VPS>:8080/api/device/v1/link` (за прокси — `wss://`). Прокси должен пропускать WebSocket для `/api/device/v1/link` и `/api/mobile/devices/<id>/live` — пример nginx в docs/device-protocol.md, раздел 6.
+- Проверка без прибора: эмулятор `scripts/device-link-emulator.py` с ключом **тестового** устройства (не `stg-device-001`), см. docs/device-protocol.md, раздел 7.
+- Без тома `./data` копии файлов пропадут при пересоздании контейнера, а без `chown` сервис не сможет их записать (в журнале — `UnauthorizedAccessException`).
+
 ### Обновление до 1.5.0 (настройки прибора)
 
 ```bash

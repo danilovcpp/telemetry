@@ -3,10 +3,11 @@ using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Application.Common;
 using DeviceTelemetry.Application.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 
-public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context)
+public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context, IOptions<MobileFeatureOptions> featureOptions)
     : IQueryHandler<GetDeviceDetailsQuery, DeviceDetailsDto>
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -42,8 +43,11 @@ public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context)
                     d.OfflineAfterS,
                     d.MonitoringEnabled != false,
                     d.TimeZone,
-                    null),
+                    null,
+                    null!),
                 d.Channels,
+                d.LinkHello,
+                HasCopies = d.LogFiles.Any(f => f.StoredSize > 0 && !f.Deleted),
             })
             .SingleOrDefaultAsync(ct);
 
@@ -51,8 +55,12 @@ public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context)
             return MobileErrors.DeviceNotFound;
 
         // The channel catalog is a small jsonb list; deserializing it here keeps the response strongly typed.
-        return row.Channels is null
-            ? row.Details
-            : row.Details with { Channels = JsonSerializer.Deserialize<List<TelemetryChannel>>(row.Channels, SerializerOptions) };
+        return row.Details with
+        {
+            Channels = row.Channels is null
+                ? null
+                : JsonSerializer.Deserialize<List<TelemetryChannel>>(row.Channels, SerializerOptions),
+            Features = MobileFeatures.For(featureOptions.Value, row.LinkHello, row.HasCopies),
+        };
     }
 }

@@ -1,5 +1,8 @@
-﻿using DeviceTelemetry.Application.Abstractions.Integrations;
+﻿using DeviceTelemetry.Application.Abstractions.DeviceLink;
+using DeviceTelemetry.Application.Abstractions.Integrations;
 using DeviceTelemetry.Application.Abstractions.Persistence;
+using DeviceTelemetry.Application.Mobile;
+using DeviceTelemetry.Infrastructure.DeviceLink;
 using DeviceTelemetry.Infrastructure.Integrations.Email;
 using DeviceTelemetry.Infrastructure.Outbox;
 using DeviceTelemetry.Infrastructure.Persistence;
@@ -50,6 +53,43 @@ public static class DependencyInjection
         services.AddHostedService<OutboxBackgroundService>();
         services.AddHostedService<SilenceMonitorBackgroundService>();
 
+        services.AddDeviceLink(configuration);
+
         return services;
+    }
+
+    /// <summary>Device Link (live values, data file copies) and the switches of the mobile features built on it.</summary>
+    private static void AddDeviceLink(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<DeviceLinkOptions>()
+            .Bind(configuration.GetSection(DeviceLinkOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<LiveOptions>()
+            .Bind(configuration.GetSection(LiveOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<SyncOptions>()
+            .Bind(configuration.GetSection(SyncOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<StorageOptions>()
+            .Bind(configuration.GetSection(StorageOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<MobileFeatureOptions>().Configure(options =>
+        {
+            options.DeviceLinkEnabled = configuration.GetValue<bool>("DeviceLink:Enabled");
+            options.LiveEnabled = configuration.GetValue<bool>("MobileApi:LiveEnabled");
+            options.HistoryEnabled = configuration.GetValue<bool>("MobileApi:HistoryEnabled");
+        });
+
+        services.AddSingleton<DeviceLinkRegistry>();
+        services.AddSingleton<IDeviceLinkStatus>(provider => provider.GetRequiredService<DeviceLinkRegistry>());
+        services.AddSingleton<LogFileStorage>();
+        services.AddSingleton<ILogFileStorage>(provider => provider.GetRequiredService<LogFileStorage>());
+        services.AddSingleton<LiveHub>();
+        services.AddSingleton<LogSynchronizer>();
+        services.AddSingleton<DeviceLinkHandler>();
     }
 }

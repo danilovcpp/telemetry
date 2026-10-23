@@ -339,3 +339,7 @@ ASALocalRun/
 
 # Runtime environment with secrets (template: .env.example)
 .env
+
+# Copies of device data files (Storage:DataRoot) when running locally
+/data/
+src/DeviceTelemetry.Api/data/

@@ -1,12 +1,15 @@
 # Staging stack: API + PostgreSQL + Mailpit (test SMTP with a web UI). Configuration comes from .env.
+#   mkdir -p data && sudo chown 1654:1654 data         # copies of device data files (Storage__DataRoot=/data)
 #   docker compose up -d
 #   docker compose logs api | grep "Staging API key"   # device keys from the first start
 services:
   api:
-    image: ${API_IMAGE:-fkonstantin/telemetry:1.5.0}
+    image: ${API_IMAGE:-fkonstantin/telemetry:1.6.0}
     env_file: .env
     ports:
       - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./data:/data
     depends_on:
       postgres:
         condition: service_healthy

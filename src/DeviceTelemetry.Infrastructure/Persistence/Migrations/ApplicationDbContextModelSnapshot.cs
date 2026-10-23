@@ -148,6 +148,12 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("LinkHello")
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("LinkHelloAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool?>("MonitoringEnabled")
                         .HasColumnType("boolean");
 
@@ -195,6 +201,58 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_Devices_ApiKeyHash_Length", "\"ApiKeyHash\" IS NULL OR octet_length(\"ApiKeyHash\") = 32");
                         });
+                });
+
+            modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLogFile", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Channel")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Closed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("DeviceSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Generation")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Month")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<long>("StoredSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SyncedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId", "Path")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId", "Channel", "Month");
+
+                    b.ToTable("DeviceLogFiles", (string)null);
                 });
 
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.TelemetryEvent", b =>
@@ -342,6 +400,17 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Navigation("Customer");
                 });
 
+            modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLogFile", b =>
+                {
+                    b.HasOne("DeviceTelemetry.Domain.Entities.Device", "Device")
+                        .WithMany("LogFiles")
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+                });
+
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.TelemetryEvent", b =>
                 {
                     b.HasOne("DeviceTelemetry.Domain.Entities.Device", "Device")
@@ -361,6 +430,8 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.Device", b =>
                 {
                     b.Navigation("Events");
+
+                    b.Navigation("LogFiles");
                 });
 #pragma warning restore 612, 618
         }

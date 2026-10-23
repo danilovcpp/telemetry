@@ -12,7 +12,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-API_VERSION = "1.2.0"
+API_VERSION = "1.3.0"
 OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "mobile-api.openapi.json"
 
 DESCRIPTION = (
@@ -22,7 +22,11 @@ DESCRIPTION = (
     "will change this contract.\n\n"
     "Errors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request "
     "validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, "
-    "exceeded requests get 429 with `Retry-After`."
+    "exceeded requests get 429 with `Retry-After`.\n\n"
+    "**Live values** are a WebSocket, `GET /api/mobile/devices/{deviceId}/live`, which OpenAPI cannot describe: "
+    "see docs/mobile-api.md (frames `status` and `values`). Offer it only when the device card's `features` "
+    "contains `live`; `logs` and `data` need `history`. Live values and data files come from the devices over "
+    "Device Link (`/api/device/v1/link`, not part of this API)."
 )
 
 

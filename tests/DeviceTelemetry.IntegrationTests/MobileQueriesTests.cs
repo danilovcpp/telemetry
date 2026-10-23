@@ -12,6 +12,7 @@ using DeviceTelemetry.Infrastructure.Persistence;
 using DeviceTelemetry.Tests.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Options;
 
 namespace DeviceTelemetry.IntegrationTests;
 
@@ -250,11 +251,12 @@ public sealed class MobileQueriesTests(PostgresFixture postgres)
         await SeedEventsAsync(device.Id, [T0.AddMinutes(-30)]);
 
         await using var db = CapturingContext();
-        var result = await new GetDeviceDetailsQueryHandler(db).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
+        var result = await new GetDeviceDetailsQueryHandler(db, Options.Create(new MobileFeatureOptions())).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
 
         Assert.Equal(
-            new DeviceDetailsDto(device.Id, device.DeviceCode, device.Name, device.CustomerId, T0.AddMinutes(10), events[0].StatusCode, null, null, null, null, true, null, null),
-            result.Value);
+            new DeviceDetailsDto(device.Id, device.DeviceCode, device.Name, device.CustomerId, T0.AddMinutes(10), events[0].StatusCode, null, null, null, null, true, null, null, null!),
+            result.Value with { Features = null! });
+        Assert.Empty(result.Value.Features);
 
         // A single statement that reads only the newest event instead of the whole history.
         var sql = Assert.Single(_sql.Commands);
@@ -269,7 +271,7 @@ public sealed class MobileQueriesTests(PostgresFixture postgres)
         var device = await SeedDeviceAsync();
 
         await using var db = postgres.CreateContext();
-        var result = await new GetDeviceDetailsQueryHandler(db).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
+        var result = await new GetDeviceDetailsQueryHandler(db, Options.Create(new MobileFeatureOptions())).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.Value.LastEventAtUtc);
@@ -280,7 +282,7 @@ public sealed class MobileQueriesTests(PostgresFixture postgres)
     public async Task Unknown_device_details_are_not_found()
     {
         await using var db = postgres.CreateContext();
-        var result = await new GetDeviceDetailsQueryHandler(db).HandleAsync(new GetDeviceDetailsQuery(int.MaxValue), CancellationToken.None);
+        var result = await new GetDeviceDetailsQueryHandler(db, Options.Create(new MobileFeatureOptions())).HandleAsync(new GetDeviceDetailsQuery(int.MaxValue), CancellationToken.None);
 
         Assert.Equal(MobileErrors.DeviceNotFound, result.Error);
     }
@@ -322,7 +324,7 @@ public sealed class MobileQueriesTests(PostgresFixture postgres)
 
         await using var db = postgres.CreateContext();
         var list = await new GetCustomerDevicesQueryHandler(db).HandleAsync(new GetCustomerDevicesQuery(device.CustomerId), CancellationToken.None);
-        var details = await new GetDeviceDetailsQueryHandler(db).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
+        var details = await new GetDeviceDetailsQueryHandler(db, Options.Create(new MobileFeatureOptions())).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
 
         var item = Assert.Single(list.Value);
         Assert.Equal((lastSeen, silentSince), (item.LastSeenAtUtc, item.SilentSinceUtc));
