@@ -1,0 +1,21 @@
+# TLS for Device Link on Staging: wss://<TLS_HOST>:8443/api/device/v1/link -> telemetry:8080.
+# Let's Encrypt certificate with an ECDSA P-256 key (the device offers ECDHE + AES-GCM on P-256/P-384 only).
+# The ACME HTTP-01 challenge needs port 80 of the VPS reachable from the internet; Caddy answers it itself.
+# Session tickets (TLS resumption) are on by default; Caddy rotates the ticket keys.
+{
+	email {$ACME_EMAIL}
+	key_type p256
+	# Let's Encrypt only: no fallback to another CA, whose root the device would not accept.
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+{$TLS_HOST}:8443 {
+	# Only the device channel. Telemetry and the mobile API stay on :8080 for now.
+	handle /api/device/v1/link {
+		reverse_proxy telemetry:8080
+	}
+
+	handle {
+		respond 404
+	}
+}

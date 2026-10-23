@@ -345,6 +345,71 @@ sudo docker compose logs -f telemetry | grep -m1 "Now listening"   # дожда�
 - Проверка без прибора: эмулятор `scripts/device-link-emulator.py` с ключом **тестового** устройства (не `stg-device-001`), см. docs/device-protocol.md, раздел 7.
 - Без тома `./data` копии файлов пропадут при пересоздании контейнера, а без `chown` сервис не сможет их записать (в журнале — `UnauthorizedAccessException`).
 
+### wss:// для Device Link на Staging (порт 8443)
+
+Прибор (FW 3.33) проверяет цепочку сертификата до закреплённого корня и **DNS-имя** из `link_url`; проверку по IP-адресу он не поддерживает. Перед сервисом ставится Caddy: он получает сертификат Let's Encrypt с ключом ECDSA P-256 и проксирует только `/api/device/v1/link`. Телеметрия и мобильный API остаются на `:8080`.
+
+Что нужно заранее:
+
+- **DNS-имя**, указывающее на VPS (A-запись). Если домена нет, подойдёт `<IP через дефисы>.sslip.io`, например `203-0-113-5.sslip.io`: это имя само указывает на `203.0.113.5`.
+- **Порт 80** открыт из интернета и не занят: на нём Let's Encrypt проверяет владение именем (HTTP-01). Порт **8443** открыт для приборов.
+
+1. Положите в папку проекта файл `Caddyfile` из репозитория (`deploy/staging-tls/Caddyfile`), а в `.env` добавьте:
+
+   ```
+   TLS_HOST=203-0-113-5.sslip.io
+   ACME_EMAIL=<ваш адрес для уведомлений Let's Encrypt>
+   ```
+
+2. В `docker-compose.yml` добавьте сервис рядом с `telemetry`:
+
+   ```yaml
+     caddy:
+       image: caddy:2.10
+       container_name: caddy
+       restart: unless-stopped
+       ports:
+         - "80:80"                         # только выдача и продление сертификата
+         - "8443:8443"                     # wss:// для приборов
+       environment:
+         TLS_HOST: "${TLS_HOST:?укажите TLS_HOST в .env}"
+         ACME_EMAIL: "${ACME_EMAIL:?укажите ACME_EMAIL в .env}"
+       volumes:
+         - ./Caddyfile:/etc/caddy/Caddyfile:ro
+         - caddy-data:/data                # сертификат и ключи; без тома каждый запуск — новый сертификат и лимиты LE
+       networks:
+         - infra
+   ```
+
+   и том в конце файла:
+
+   ```yaml
+   volumes:
+     caddy-data:
+   ```
+
+3. Запуск и проверка:
+
+   ```bash
+   sudo docker compose up -d caddy
+   sudo docker compose logs caddy | grep -iE "certificate obtained|error"
+   H=$(grep ^TLS_HOST= .env | cut -d= -f2)
+
+   # Набор прибора: TLS 1.2, ECDHE-ECDSA + AES-GCM, P-256. Ожидается "Verify return code: 0 (ok)"
+   openssl s_client -connect $H:8443 -servername $H -tls1_2 -cipher ECDHE-ECDSA-AES128-GCM-SHA256 -curves P-256 -showcerts </dev/null \
+     | grep -E "^ *[0-9] s:|i:|Verify return|Peer signature|Server Temp Key"
+
+   # Возобновление сессии: вторая строка должна быть "Reused"
+   openssl s_client -connect $H:8443 -servername $H -tls1_2 -sess_out /tmp/tls.sess </dev/null 2>/dev/null | grep -E "^(New|Reused)"
+   openssl s_client -connect $H:8443 -servername $H -tls1_2 -sess_in /tmp/tls.sess </dev/null 2>/dev/null | grep -E "^(New|Reused)"
+   ```
+
+   В выводе `-showcerts` строка `i:` последнего сертификата цепочки — корень, до которого проверяет прибор (например, `ISRG Root X2` или `ISRG Root X1`). Его PEM — на https://letsencrypt.org/certificates/.
+
+4. Прибор: `link_url wss://<TLS_HOST>:8443/api/device/v1/link`. Без прибора проверяется эмулятором: `python scripts/device-link-emulator.py --url wss://<TLS_HOST>:8443/api/device/v1/link --device-id <тестовый прибор> --key dtk_... --samples samples`.
+
+Сертификат Let's Encrypt живёт 90 дней (срок постепенно сокращается); Caddy продлевает его сам, корень при этом не меняется. При продлении Caddy генерирует новый ключ, поэтому закреплять ключ сервера на приборе нельзя — только корни.
+
 ### Обновление до 1.5.0 (настройки прибора)
 
 ```bash
