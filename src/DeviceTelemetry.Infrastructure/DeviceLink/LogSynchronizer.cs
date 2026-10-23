@@ -59,6 +59,8 @@ public sealed class LogSynchronizer(
 
                     if (timeProvider.GetUtcNow() >= nextListing)
                     {
+                        // A failed listing is retried after a minute, not immediately.
+                        nextListing = timeProvider.GetUtcNow().AddSeconds(Math.Min(60, _options.IntervalS));
                         await ListAsync(state, ct);
                         state.FirstSync = false;
                         state.Backlog = await LoadBacklogAsync(state, ct);

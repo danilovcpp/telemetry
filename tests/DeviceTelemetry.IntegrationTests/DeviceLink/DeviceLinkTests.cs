@@ -372,6 +372,24 @@ public sealed class DeviceLinkTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Answers_without_op_are_matched_by_reqId()
+    {
+        var server = StartServer();
+        var client = server.CreateClient();
+        var device = await SeedDeviceAsync();
+        var path = $"LOG/CH1/{CurrentMonth}/05.TSV";
+        var content = TsvBytes(150);
+        await using var link = await FakeDevice.ConnectAsync(server, device.DeviceCode, TestData.DeviceKey, setup: d =>
+        {
+            d.AnswersWithoutOp = true;
+            d.AddFile(1, CurrentMonth, path, content, closed: true);
+        });
+
+        await EventuallyAsync(async () => (await FilesAsync(device.Id)) is [var f] && f.StoredSize == content.Length, "the file is copied");
+        Assert.Equal(content, await client.GetByteArrayAsync(DataUrl(device.Id, path)));
+    }
+
+    [Fact]
     public async Task Data_supports_range_head_and_conditional_requests_byte_exact()
     {
         var server = StartServer(new Dictionary<string, string?> { ["Sync:IntervalS"] = "1" });

@@ -41,7 +41,7 @@ public sealed class DeviceLinkHandler(
 
                 while (session.Hello is null)
                 {
-                    var frame = await ReceiveAsync(socket, buffer, helloTimeout.Token);
+                    var frame = await ReceiveAsync(socket, deviceId, buffer, helloTimeout.Token);
                     if (frame is null)
                         return;
 
@@ -49,7 +49,7 @@ public sealed class DeviceLinkHandler(
                     {
                         if (frame.Value.Op != "hello")
                         {
-                            logger.LogDebug("Device {DeviceId}: '{Op}' before hello ignored", deviceId, Truncate(frame.Value.Op));
+                            logger.LogInformation("Device {DeviceId}: '{Op}' before hello ignored", deviceId, Truncate(frame.Value.Op));
                             continue;
                         }
 
@@ -70,7 +70,7 @@ public sealed class DeviceLinkHandler(
 
             while (true)
             {
-                var frame = await ReceiveAsync(socket, buffer, session.Closed);
+                var frame = await ReceiveAsync(socket, deviceId, buffer, session.Closed);
                 if (frame is null)
                     return;
 
@@ -128,6 +128,16 @@ public sealed class DeviceLinkHandler(
                         liveHub.OnHelloChanged(session);
                     break;
 
+                case "" when root.TryGetProperty("reqId", out var id):
+                    logger.LogInformation(
+                        "Device {DeviceId}: answer with reqId {ReqId} matches no open request (late or wrong reqId); ignored",
+                        session.DeviceId, Truncate(id.GetRawText()));
+                    break;
+
+                case "":
+                    logger.LogInformation("Device {DeviceId}: frame without op and reqId ignored", session.DeviceId);
+                    break;
+
                 default:
                     logger.LogInformation("Device {DeviceId}: unknown or unexpected op '{Op}' ignored", session.DeviceId, Truncate(frame.Op));
                     break;
@@ -163,10 +173,11 @@ public sealed class DeviceLinkHandler(
         return true;
     }
 
+    /// <param name="Op">The frame's <c>op</c>, or empty when it has none (answers are matched by <c>reqId</c> alone).</param>
     private readonly record struct Frame(string Op, string Raw, JsonDocument Document);
 
-    /// <summary>Next JSON text frame; <c>null</c> when the connection is closing. Oversized frames close it (1009).</summary>
-    private async Task<Frame?> ReceiveAsync(WebSocket socket, byte[] buffer, CancellationToken ct)
+    /// <summary>Next JSON object frame; <c>null</c> when the connection is closing. Oversized frames close it (1009).</summary>
+    private async Task<Frame?> ReceiveAsync(WebSocket socket, int deviceId, byte[] buffer, CancellationToken ct)
     {
         while (true)
         {
@@ -194,7 +205,7 @@ public sealed class DeviceLinkHandler(
 
             if (result.MessageType != WebSocketMessageType.Text)
             {
-                logger.LogDebug("Binary frame ignored");
+                logger.LogInformation("Device {DeviceId}: binary frame ignored (Device Link uses text frames)", deviceId);
                 continue;
             }
 
@@ -207,19 +218,19 @@ public sealed class DeviceLinkHandler(
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException)
             {
-                logger.LogInformation("Frame that is not valid JSON ignored");
+                logger.LogInformation("Device {DeviceId}: frame that is not valid JSON ignored", deviceId);
                 continue;
             }
 
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty("op", out var op) || op.ValueKind != JsonValueKind.String)
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
                 document.Dispose();
-                logger.LogInformation("Frame without an op ignored");
+                logger.LogInformation("Device {DeviceId}: frame that is not a JSON object ignored", deviceId);
                 continue;
             }
 
-            return new Frame(op.GetString()!, raw, document);
+            var op = document.RootElement.TryGetProperty("op", out var o) && o.ValueKind == JsonValueKind.String ? o.GetString()! : "";
+            return new Frame(op, raw, document);
         }
     }
 

@@ -33,6 +33,9 @@ public sealed class FakeDevice : IAsyncDisposable
     /// <summary>When set, <c>file.read</c> answers wait for it.</summary>
     public TaskCompletionSource? ReadGate { get; set; }
 
+    /// <summary>Answers to <c>logs.*</c> and <c>file.read</c> carry only <c>reqId</c>, no <c>op</c>.</summary>
+    public bool AnswersWithoutOp { get; set; }
+
     /// <summary>Error code to answer <c>live.start</c> with (e.g. <c>not_supported</c>).</summary>
     public string? LiveStartError { get; set; }
 
@@ -97,6 +100,13 @@ public sealed class FakeDevice : IAsyncDisposable
             new JsonObject { ["id"] = "ch1", ["t"] = t, ["value"] = 21.5 + t },
             new JsonObject { ["id"] = "ch2", ["t"] = t, ["value"] = 1.25 }),
     });
+
+    private Task AnswerAsync(JsonObject message)
+    {
+        if (AnswersWithoutOp)
+            message.Remove("op");
+        return SendAsync(message);
+    }
 
     public async Task SendAsync(JsonObject message)
     {
@@ -171,7 +181,7 @@ public sealed class FakeDevice : IAsyncDisposable
             {
                 var ch = (int)message["ch"]!;
                 var months = Files.Values.Where(f => f.Channel == ch).Select(f => f.Month).Distinct().Order();
-                await SendAsync(new JsonObject
+                await AnswerAsync(new JsonObject
                 {
                     ["op"] = "logs.months", ["reqId"] = reqId, ["months"] = new JsonArray(months.Select(m => (JsonNode)m).ToArray()),
                 });
@@ -187,7 +197,7 @@ public sealed class FakeDevice : IAsyncDisposable
                     {
                         ["path"] = f.Key, ["size"] = f.Value.Content.Length, ["closed"] = f.Value.Closed, ["complete"] = f.Value.Closed,
                     });
-                await SendAsync(new JsonObject { ["op"] = "logs.days", ["reqId"] = reqId, ["days"] = new JsonArray(days.ToArray()) });
+                await AnswerAsync(new JsonObject { ["op"] = "logs.days", ["reqId"] = reqId, ["days"] = new JsonArray(days.ToArray()) });
                 break;
             }
 
@@ -209,7 +219,7 @@ public sealed class FakeDevice : IAsyncDisposable
 
                 var take = (int)Math.Max(0, Math.Min(Math.Min(length, MaxChunk), file.Content.Length - offset));
                 var data = offset <= file.Content.Length ? file.Content.AsSpan((int)offset, take).ToArray() : [];
-                await SendAsync(new JsonObject
+                await AnswerAsync(new JsonObject
                 {
                     ["op"] = "file.data",
                     ["reqId"] = reqId,
