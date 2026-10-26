@@ -254,7 +254,7 @@ public sealed class MobileQueriesTests(PostgresFixture postgres)
         var result = await new GetDeviceDetailsQueryHandler(db, Options.Create(new MobileFeatureOptions())).HandleAsync(new GetDeviceDetailsQuery(device.Id), CancellationToken.None);
 
         Assert.Equal(
-            new DeviceDetailsDto(device.Id, device.DeviceCode, device.Name, device.CustomerId, T0.AddMinutes(10), events[0].StatusCode, null, null, null, null, true, null, null, null!),
+            new DeviceDetailsDto(device.Id, device.DeviceCode, device.Name, device.CustomerId, T0.AddMinutes(10), events[0].StatusCode, null, null, null, null, true, null, null, null!, false),
             result.Value with { Features = null! });
         Assert.Empty(result.Value.Features);
 

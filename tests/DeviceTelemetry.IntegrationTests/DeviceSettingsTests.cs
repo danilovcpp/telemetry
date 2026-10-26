@@ -82,7 +82,7 @@ public sealed class DeviceSettingsTests(PostgresFixture postgres) : IAsyncLifeti
 
         Assert.Empty(result.Value.Rejected);
         Assert.Equal(
-            new DeviceSettingsDto("Boiler room logger", "site@example.org", "de", "Europe/Berlin", 300, 1800, true, result.Value.Settings.Channels),
+            new DeviceSettingsDto("Boiler room logger", "site@example.org", "de", "Europe/Berlin", 300, 1800, true, result.Value.Settings.Channels, false),
             result.Value.Settings);
         Assert.Equal([new TelemetryChannel("ch1", "130AA15P20"), new TelemetryChannel("ch2", "TEX0000001")], result.Value.Settings.Channels!);
     }
@@ -139,6 +139,92 @@ public sealed class DeviceSettingsTests(PostgresFixture postgres) : IAsyncLifeti
         await using var db = NewContext();
         Assert.All(await db.TelemetryEvents.Where(e => e.StatusCode == 190003).Select(e => e.Payload).ToListAsync(),
             payload => Assert.DoesNotContain("@", payload));
+    }
+
+    [Fact]
+    public async Task The_answer_carries_the_address_in_effect_even_when_the_device_sends_none()
+    {
+        var result = await UpdateAsync(new DeviceSettingsInput(Name: "Logger"));
+
+        Assert.Equal("customer@example.com", result.Value.NotifyEmail);
+        Assert.Null(result.Value.Settings.NotifyEmail);
+    }
+
+    [Fact]
+    public async Task A_new_address_is_confirmed_in_the_answer_and_used_for_the_next_event()
+    {
+        var result = await UpdateAsync(new DeviceSettingsInput(NotifyEmail: "lab@example.org"));
+        await SendAsync(100001);
+
+        Assert.Equal("lab@example.org", result.Value.NotifyEmail);
+        Assert.Equal("lab@example.org", Assert.Single(await EmailsAsync(), e => e.StatusCode == 100001).Email.To);
+    }
+
+    [Fact]
+    public async Task Null_switches_emails_off_until_the_device_sends_an_address_again()
+    {
+        await UpdateAsync(new DeviceSettingsInput(NotifyEmail: "lab@example.org"));
+
+        // Off: no address in effect, the event is stored, no email for it.
+        var off = await UpdateAsync(new DeviceSettingsInput(DisableNotifications: true));
+        Assert.Null(off.Value.NotifyEmail);
+        Assert.True(off.Value.Settings.NotificationsDisabled);
+        Assert.Equal("lab@example.org", off.Value.Settings.NotifyEmail); // the stored address is kept
+        await SendAsync(100003, channels: [new("ch1", "130AA15P20")]);
+
+        // A command without the field does not switch emails back on.
+        var unchanged = await UpdateAsync(new DeviceSettingsInput(Name: "Logger"));
+        Assert.Null(unchanged.Value.NotifyEmail);
+        await SendAsync(100001);
+
+        var emails = await EmailsAsync();
+        Assert.DoesNotContain(emails, e => e.StatusCode is 100003 or 100001);
+        await using (var db = NewContext())
+            Assert.Equal(2, await db.TelemetryEvents.CountAsync(e => e.StatusCode == 100003 || e.StatusCode == 100001));
+
+        // The previous recipient learns that emails were switched off.
+        var notice = emails.Last(e => e.StatusCode == TelemetryStatusCodes.NotifyEmailChanged).Email;
+        Assert.Equal("lab@example.org", notice.To);
+        Assert.Contains("switched off on the device", notice.Body);
+
+        // An address switches emails on again.
+        var on = await UpdateAsync(new DeviceSettingsInput(NotifyEmail: "site@example.org"));
+        Assert.Equal("site@example.org", on.Value.NotifyEmail);
+        Assert.False(on.Value.Settings.NotificationsDisabled);
+        await SendAsync(100001);
+        Assert.Equal("site@example.org", (await EmailsAsync()).Last(e => e.StatusCode == 100001).Email.To);
+    }
+
+    [Fact]
+    public async Task An_empty_address_switches_emails_on_with_the_customer_address()
+    {
+        await UpdateAsync(new DeviceSettingsInput(DisableNotifications: true));
+
+        var result = await UpdateAsync(new DeviceSettingsInput(NotifyEmail: ""));
+
+        Assert.Equal("customer@example.com", result.Value.NotifyEmail);
+    }
+
+    [Fact]
+    public async Task A_rejected_address_answers_with_the_address_still_in_effect()
+    {
+        await UpdateAsync(new DeviceSettingsInput(NotifyEmail: "lab@example.org"));
+
+        var result = await UpdateAsync(new DeviceSettingsInput(NotifyEmail: "not an email"));
+
+        Assert.Contains("notifyEmail", result.Value.Rejected.Keys);
+        Assert.Equal("lab@example.org", result.Value.NotifyEmail);
+    }
+
+    [Fact]
+    public async Task Switched_off_emails_also_silence_the_silence_monitor_but_not_its_events()
+    {
+        await UpdateAsync(new DeviceSettingsInput(ReportIntervalS: 60, DisableNotifications: true));
+        _time.Advance(TimeSpan.FromHours(1));
+
+        Assert.Equal(1, await CheckSilenceAsync());
+
+        Assert.DoesNotContain(await EmailsAsync(), e => e.StatusCode == TelemetryStatusCodes.DeviceSilent);
     }
 
     [Fact]

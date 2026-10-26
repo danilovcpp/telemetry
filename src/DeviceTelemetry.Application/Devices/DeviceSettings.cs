@@ -9,6 +9,8 @@ namespace DeviceTelemetry.Application.Devices;
 /// <summary>
 /// Settings a device reports, either in the settings command or (the first three) in any telemetry message.
 /// For every field: <c>null</c> = not sent, keep the stored value. Strings: empty = clear (except <see cref="Name"/>).
+/// <see cref="DisableNotifications"/>: the settings command carried <c>"notifyEmail": null</c> (switch emails off);
+/// <see cref="NotifyEmail"/> is then ignored.
 /// </summary>
 public sealed record DeviceSettingsInput(
     string? NotifyEmail = null,
@@ -18,7 +20,8 @@ public sealed record DeviceSettingsInput(
     string? TimeZone = null,
     int? OfflineAfterS = null,
     bool? Monitoring = null,
-    IReadOnlyList<TelemetryChannel>? Channels = null);
+    IReadOnlyList<TelemetryChannel>? Channels = null,
+    bool DisableNotifications = false);
 
 /// <summary>A resolved change of one setting: <see cref="IsSet"/> = write <see cref="Value"/> (a <c>null</c> value clears).</summary>
 public readonly record struct SettingChange<T>(bool IsSet, T Value)
@@ -35,6 +38,9 @@ public readonly record struct SettingChange<T>(bool IsSet, T Value)
 public sealed class ResolvedDeviceSettings
 {
     public SettingChange<string?> NotifyEmail { get; init; }
+
+    /// <summary><c>true</c>: emails switched off by the device; <c>false</c>: an address (or empty) was sent, emails are on again.</summary>
+    public SettingChange<bool> NotificationsDisabled { get; init; }
     public SettingChange<string?> NotifyLanguage { get; init; }
     public SettingChange<int?> ReportIntervalS { get; init; }
     public SettingChange<string> Name { get; init; }
@@ -66,9 +72,16 @@ public static class DeviceSettingsResolver
             rejectedValues[field] = text.Length <= RejectedValueMaxLength ? text : text[..RejectedValueMaxLength];
         }
 
+        // null switches emails off and keeps the stored address; an accepted address or "" switches them on again.
+        var notifyEmail = input.DisableNotifications ? SettingChange<string?>.None : ResolveEmail(input.NotifyEmail, Reject);
+        var notificationsDisabled = input.DisableNotifications
+            ? SettingChange<bool>.To(true)
+            : notifyEmail.IsSet ? SettingChange<bool>.To(false) : SettingChange<bool>.None;
+
         return new ResolvedDeviceSettings
         {
-            NotifyEmail = ResolveEmail(input.NotifyEmail, Reject),
+            NotifyEmail = notifyEmail,
+            NotificationsDisabled = notificationsDisabled,
             NotifyLanguage = ResolveOptionalString(input.NotifyLanguage, "notifyLanguage",
                 v => NotificationLanguages.TryNormalize(v, out var l) ? l : null,
                 $"supported languages: {string.Join(", ", NotificationLanguages.Supported)}", Reject),

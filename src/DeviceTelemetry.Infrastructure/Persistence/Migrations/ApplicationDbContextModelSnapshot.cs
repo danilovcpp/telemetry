@@ -162,6 +162,9 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<bool>("NotificationsDisabled")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("NotifyEmail")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)");

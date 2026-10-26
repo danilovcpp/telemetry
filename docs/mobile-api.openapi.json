@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "DeviceTelemetry Mobile API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`.\n\n**Live values** are a WebSocket, `GET /api/mobile/devices/{deviceId}/live`, which OpenAPI cannot describe: see docs/mobile-api.md (frames `status` and `values`). Offer it only when the device card's `features` contains `live`; `logs` and `data` need `history`. Live values and data files come from the devices over Device Link (`/api/device/v1/link`, not part of this API)."
   },
   "servers": [
@@ -659,7 +659,8 @@
           "monitoring",
           "timeZone",
           "channels",
-          "features"
+          "features",
+          "notificationsDisabled"
         ],
         "type": "object",
         "properties": {
@@ -742,6 +743,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "notificationsDisabled": {
+            "type": "boolean"
           }
         }
       },

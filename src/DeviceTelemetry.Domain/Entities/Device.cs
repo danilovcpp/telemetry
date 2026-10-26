@@ -25,6 +25,12 @@ public class Device : BaseAuditableEntity
     /// <summary>Notification address requested by the device itself; overrides the customer's email when set.</summary>
     public string? NotifyEmail { get; set; }
 
+    /// <summary>
+    /// The device switched email notifications off (<c>"notifyEmail": null</c> in the settings command). No email is sent for
+    /// this device to any address until the device sends an address again; events, reports and silence detection go on.
+    /// </summary>
+    public bool NotificationsDisabled { get; set; }
+
     /// <summary>Notification language requested by the device; overrides the customer's language when set.</summary>
     public string? NotifyLanguage { get; set; }
 

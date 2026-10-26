@@ -31,4 +31,12 @@ public static class NotificationLanguages
         language = primary;
         return true;
     }
+
+    /// <summary>Text for <c>{NotifyEmail}</c> in 190003 when the device switched emails off (no new address).</summary>
+    public static string NoRecipientText(string language) => language switch
+    {
+        Russian => "никуда: уведомления по e-mail выключены на приборе",
+        German => "keine: E-Mail-Benachrichtigungen sind am Gerät ausgeschaltet",
+        _ => "none: e-mail notifications are switched off on the device",
+    };
 }

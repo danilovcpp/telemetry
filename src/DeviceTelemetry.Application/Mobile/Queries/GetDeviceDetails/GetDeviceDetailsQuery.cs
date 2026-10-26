@@ -15,7 +15,8 @@ public sealed record GetDeviceDetailsQuery(int DeviceId) : IQuery<DeviceDetailsD
 /// <see cref="OfflineAfterS"/> and have <see cref="Monitoring"/> on. <see cref="TimeZone"/> and <see cref="Channels"/>
 /// (the channel names) are set by the device. The notification address is deliberately not exposed (public API).
 /// <see cref="Features"/> lists the optional screens the app may offer for the device (<c>live</c>, <c>history</c>); it is
-/// always present and may be empty.
+/// always present and may be empty. <see cref="NotificationsDisabled"/>: the device switched its email notifications off
+/// (show "emails switched off on the device"); the address itself is not exposed.
 /// </summary>
 public sealed record DeviceDetailsDto(
     int Id,
@@ -31,4 +32,5 @@ public sealed record DeviceDetailsDto(
     bool Monitoring,
     string? TimeZone,
     IReadOnlyList<TelemetryChannel>? Channels,
-    IReadOnlyList<string> Features);
+    IReadOnlyList<string> Features,
+    bool NotificationsDisabled);

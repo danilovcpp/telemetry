@@ -1,6 +1,6 @@
 # DeviceTelemetry — API для мобильного приложения
 
-Версия контракта: **1.3.0** (MVP). Задание для разработчика приложения — что строить и как — [mobile-app-integration.md](mobile-app-integration.md). Машиночитаемая спецификация: [`mobile-api.openapi.json`](mobile-api.openapi.json) (OpenAPI 3.1, подходит для генерации клиента, см. [раздел 13](#13-генерация-клиента)).
+Версия контракта: **1.4.0** (MVP). Задание для разработчика приложения — что строить и как — [mobile-app-integration.md](mobile-app-integration.md). Машиночитаемая спецификация: [`mobile-api.openapi.json`](mobile-api.openapi.json) (OpenAPI 3.1, подходит для генерации клиента, см. [раздел 13](#13-генерация-клиента)).
 
 API даёт экраны: список устройств клиента, карточку устройства, его текущее состояние, историю событий, а для приборов с Device Link — живые значения ([раздел 11](#11-живые-значения-websocket)) и сохранённые файлы данных ([раздел 12](#12-сохранённые-данные)). Все операции — только чтение.
 
@@ -177,6 +177,7 @@ GET /api/mobile/devices/{deviceId}
 | `timeZone` | string или `null` | часовой пояс прибора (`Europe/Berlin`, `+02:00`) — для показа времени прибора |
 | `channels` | массив `{id, name}` или `null` | справочник каналов, заданный прибором |
 | `features` | массив строк | дополнительные экраны, которые можно показать: `live` — [живые значения](#11-живые-значения-websocket), `history` — [сохранённые данные](#12-сохранённые-данные). Поле есть всегда, массив может быть пустым |
+| `notificationsDisabled` | boolean | `true` — письма по прибору выключены на самом приборе: сервер не шлёт их ни на какой адрес, пока прибор снова не пришлёт адрес. Показывайте «Письма выключены на приборе». События и контроль связи работают как обычно. Сам адрес уведомлений в API не отдаётся |
 
 ```http
 GET /api/mobile/devices/1
@@ -196,7 +197,8 @@ GET /api/mobile/devices/1
   "monitoring": true,
   "timeZone": "Europe/Berlin",
   "channels": [{"id": "ch1", "name": "Temperature"}],
-  "features": ["live", "history"]
+  "features": ["live", "history"],
+  "notificationsDisabled": false
 }
 ```
 
@@ -574,6 +576,7 @@ openapi-generator generate -i docs/mobile-api.openapi.json -g kotlin -o android/
 
 | Версия | Дата | Изменения |
 |---|---|---|
+| 1.4.0 | 2026-10-26 | `notificationsDisabled` в карточке устройства. Дополнение, существующие поля не менялись |
 | 1.3.0 | 2026-10-23 | `features` в карточке устройства; живые значения `GET /devices/{id}/live` (WebSocket); сохранённые данные `GET /devices/{id}/logs`, `GET`/`HEAD /devices/{id}/data/{path}`; коды `feature.not_available`, `log.not_found`, `logs.invalid_channel`, `logs.invalid_month`, `sync.pending`, `device.offline`. Дополнения, существующие поля не менялись |
 | 1.2.0 | 2026-10-19 | В карточке устройства — `offlineAfterS`, `monitoring`, `timeZone`, `channels`; код `190003`. Дополнения, существующие поля не менялись |
 | 1.1.0 | 2026-10-19 | Новый endpoint `GET /devices/{id}/state`; в списке и карточке — `lastSeenAtUtc`, `silentSinceUtc` (и `reportIntervalS` в карточке); в событиях — `source`, `channels`, `occurredAtRejected`. Все изменения дополняют контракт, существующие поля не менялись |

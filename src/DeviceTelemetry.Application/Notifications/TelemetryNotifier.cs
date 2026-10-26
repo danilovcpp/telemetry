@@ -15,6 +15,7 @@ namespace DeviceTelemetry.Application.Notifications;
 /// <param name="CustomerLanguage">The customer's language (<c>Customer.Language</c>).</param>
 /// <param name="DeviceTimeZone">Device time zone for the "device time" line of emails.</param>
 /// <param name="ChannelCatalog">Channel names the device reported; fill in names missing from an event's channel list.</param>
+/// <param name="NotificationsDisabled">The device switched emails off: nothing is queued for this target.</param>
 public sealed record NotificationTarget(
     string DeviceCode,
     string DeviceName,
@@ -24,7 +25,8 @@ public sealed record NotificationTarget(
     string? DeviceLanguage = null,
     string? CustomerLanguage = null,
     string? DeviceTimeZone = null,
-    IReadOnlyList<TelemetryChannel>? ChannelCatalog = null)
+    IReadOnlyList<TelemetryChannel>? ChannelCatalog = null,
+    bool NotificationsDisabled = false)
 {
     public string Language => DeviceLanguage ?? CustomerLanguage ?? NotificationLanguages.Default;
 }
@@ -73,6 +75,14 @@ public sealed class TelemetryNotifier(
             logger.LogInformation(
                 "Notification for event {EventId} (status {StatusCode}): no template in '{Language}', using '{TemplateLanguage}'",
                 telemetryEvent.Id, telemetryEvent.StatusCode, language, template.Language ?? "neutral");
+        }
+
+        if (target.NotificationsDisabled)
+        {
+            logger.LogInformation(
+                "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: emails switched off on the device",
+                telemetryEvent.Id, telemetryEvent.StatusCode, target.DeviceCode);
+            return false;
         }
 
         var recipient = target.DeviceNotifyEmail ?? target.CustomerEmail;

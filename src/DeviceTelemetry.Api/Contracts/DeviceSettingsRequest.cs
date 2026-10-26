@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Telemetry;
 
@@ -7,7 +8,8 @@ namespace DeviceTelemetry.Api.Contracts;
 /// <summary>
 /// Body of <c>POST /api/telemetry/settings</c>. Every field except <see cref="DeviceId"/> is optional: absent or <c>null</c>
 /// keeps the stored value; an empty string clears it (not for <see cref="Name"/>); an empty <see cref="Channels"/> array
-/// clears the catalog. Invalid values are reported in the response's <c>rejected</c> instead of failing the request.
+/// clears the catalog. Exception: <c>"notifyEmail": null</c> switches emails off. Invalid values are reported in the
+/// response's <c>rejected</c> instead of failing the request.
 /// </summary>
 public sealed class DeviceSettingsRequest
 {
@@ -18,8 +20,24 @@ public sealed class DeviceSettingsRequest
     /// <summary>Display name of the device, used in emails and the mobile app (1–200 characters).</summary>
     public string? Name { get; init; }
 
-    /// <summary>Address for this device's notifications; empty: use the customer's address.</summary>
-    public string? NotifyEmail { get; init; }
+    /// <summary>
+    /// Address for this device's notifications; empty: use the customer's address; <c>null</c>: send no emails for this
+    /// device until an address is sent again; absent: unchanged.
+    /// </summary>
+    public string? NotifyEmail
+    {
+        get;
+        init
+        {
+            // The serializer calls the setter only when the property is in the body, so this tells null from absent.
+            field = value;
+            NotifyEmailSent = true;
+        }
+    }
+
+    /// <summary>The body contained <c>notifyEmail</c>, possibly <c>null</c>.</summary>
+    [JsonIgnore]
+    public bool NotifyEmailSent { get; private init; }
 
     /// <summary>Notification language: <c>en</c>, <c>ru</c> or <c>de</c>; empty: the customer's language.</summary>
     public string? NotifyLanguage { get; init; }
@@ -47,5 +65,6 @@ public sealed class DeviceSettingsRequest
         TimeZone,
         OfflineAfterS,
         Monitoring,
-        Channels?.Select(c => c is null ? null! : new TelemetryChannel(c.Id ?? string.Empty, c.Name)).ToList());
+        Channels?.Select(c => c is null ? null! : new TelemetryChannel(c.Id ?? string.Empty, c.Name)).ToList(),
+        DisableNotifications: NotifyEmailSent && NotifyEmail is null);
 }

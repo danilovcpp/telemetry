@@ -13,6 +13,7 @@ public sealed record DeviceSnapshot(
     string Name,
     byte[]? ApiKeyHash,
     string? NotifyEmail,
+    bool NotificationsDisabled,
     string? NotifyLanguage,
     string? TimeZone,
     string? Channels,
@@ -24,17 +25,21 @@ public sealed record DeviceSnapshot(
 
     /// <summary>Single-statement projection (device joined with its customer), translatable by EF.</summary>
     public static readonly Expression<Func<Device, DeviceSnapshot>> Projection = d => new DeviceSnapshot(
-        d.Id, d.DeviceCode, d.Name, d.ApiKeyHash, d.NotifyEmail, d.NotifyLanguage, d.TimeZone, d.Channels,
+        d.Id, d.DeviceCode, d.Name, d.ApiKeyHash, d.NotifyEmail, d.NotificationsDisabled, d.NotifyLanguage, d.TimeZone, d.Channels,
         d.Customer.Name, d.Customer.Email, d.Customer.Language);
 
-    /// <summary>The address notifications currently go to: the device's, else the customer's.</summary>
-    public string? EffectiveEmail => NotifyEmail ?? CustomerEmail;
+    /// <summary>
+    /// The address notifications currently go to: none while the device has switched them off, else the device's, else
+    /// the customer's.
+    /// </summary>
+    public string? EffectiveEmail => NotificationsDisabled ? null : NotifyEmail ?? CustomerEmail;
 
     /// <summary>The snapshot with a set of resolved settings applied (what the row looks like after the update).</summary>
     public DeviceSnapshot With(ResolvedDeviceSettings settings) => this with
     {
         Name = settings.Name.IsSet ? settings.Name.Value : Name,
         NotifyEmail = settings.NotifyEmail.IsSet ? settings.NotifyEmail.Value : NotifyEmail,
+        NotificationsDisabled = settings.NotificationsDisabled.IsSet ? settings.NotificationsDisabled.Value : NotificationsDisabled,
         NotifyLanguage = settings.NotifyLanguage.IsSet ? settings.NotifyLanguage.Value : NotifyLanguage,
         TimeZone = settings.TimeZone.IsSet ? settings.TimeZone.Value : TimeZone,
         Channels = settings.ChannelsJson.IsSet ? settings.ChannelsJson.Value : Channels,
@@ -42,5 +47,6 @@ public sealed record DeviceSnapshot(
 
     public NotificationTarget ToTarget() => new(
         DeviceCode, Name, CustomerName, NotifyEmail, CustomerEmail, NotifyLanguage, CustomerLanguage, TimeZone,
-        Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(Channels, SerializerOptions));
+        Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(Channels, SerializerOptions),
+        NotificationsDisabled);
 }

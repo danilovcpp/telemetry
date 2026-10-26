@@ -11,6 +11,7 @@ namespace DeviceTelemetry.Application.Devices.Commands.UpdateDeviceSettings;
 /// Applies the settings a device sends and returns what is stored. Invalid values never fail the request: they are listed
 /// in <see cref="DeviceSettingsResult.Rejected"/> and the stored value stays. Counts as contact with the device (ends a
 /// silence episode); a changed notification address raises 190003 and notifies the previous address.
+/// <c>"notifyEmail": null</c> switches emails off (<see cref="DeviceSettingsInput.DisableNotifications"/>).
 /// Idempotent: repeating the same request changes nothing but the last-contact time.
 /// </summary>
 public sealed class UpdateDeviceSettingsCommandHandler(
@@ -56,6 +57,7 @@ public sealed class UpdateDeviceSettingsCommandHandler(
             .Select(d => new
             {
                 d.Name, d.NotifyEmail, d.NotifyLanguage, d.TimeZone, d.ReportIntervalS, d.OfflineAfterS, d.MonitoringEnabled, d.Channels,
+                d.NotificationsDisabled, CustomerEmail = d.Customer.Email,
             })
             .SingleAsync(ct);
 
@@ -72,7 +74,10 @@ public sealed class UpdateDeviceSettingsCommandHandler(
                 stored.ReportIntervalS,
                 stored.OfflineAfterS,
                 stored.MonitoringEnabled != false,
-                stored.Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(stored.Channels, SerializerOptions)),
-            settings.Rejected);
+                stored.Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(stored.Channels, SerializerOptions),
+                stored.NotificationsDisabled),
+            settings.Rejected,
+            // Read back after the commit: the answer confirms what is in effect, not what was asked for.
+            stored.NotificationsDisabled ? null : stored.NotifyEmail ?? stored.CustomerEmail);
     }
 }

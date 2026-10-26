@@ -15,7 +15,8 @@ namespace DeviceTelemetry.Application.Devices;
 /// <item>Updates <c>LastSeenAtUtc</c> and the settings in one statement, which also locks the device row until commit:
 /// the silence monitor cannot mark the device silent meanwhile, and concurrent messages cannot both end an episode.</item>
 /// <item>Ends a silence episode: clears <c>SilentSinceUtc</c> and raises 190002.</item>
-/// <item>When the effective notification address changes, raises 190003 and emails the <em>previous</em> address.</item>
+/// <item>When the effective notification address changes (including emails switched off or on by the device), raises
+/// 190003 and emails the <em>previous</em> address.</item>
 /// </list>
 /// </summary>
 public sealed class DeviceContactRecorder(
@@ -35,6 +36,7 @@ public sealed class DeviceContactRecorder(
             {
                 s.SetProperty(d => d.LastSeenAtUtc, nowUtc);
                 if (settings.NotifyEmail.IsSet) s.SetProperty(d => d.NotifyEmail, settings.NotifyEmail.Value);
+                if (settings.NotificationsDisabled.IsSet) s.SetProperty(d => d.NotificationsDisabled, settings.NotificationsDisabled.Value);
                 if (settings.NotifyLanguage.IsSet) s.SetProperty(d => d.NotifyLanguage, settings.NotifyLanguage.Value);
                 if (settings.ReportIntervalS.IsSet) s.SetProperty(d => d.ReportIntervalS, settings.ReportIntervalS.Value);
                 if (settings.Name.IsSet) s.SetProperty(d => d.Name, settings.Name.Value);
@@ -66,12 +68,22 @@ public sealed class DeviceContactRecorder(
         {
             // No addresses in the payload: event payloads are visible through the public mobile API.
             var changed = ServerEvents.Create(device.Id, TelemetryStatusCodes.NotifyEmailChanged, now,
-                new { setting = "notifyEmail", usesCustomerEmail = updated.NotifyEmail is null });
+                new
+                {
+                    setting = "notifyEmail",
+                    usesCustomerEmail = !updated.NotificationsDisabled && updated.NotifyEmail is null,
+                    notificationsDisabled = updated.NotificationsDisabled,
+                });
             context.TelemetryEvents.Add(changed);
 
             // Tell the previous recipient (in the device's current language) where notifications go now.
-            var previousRecipient = updated.ToTarget() with { DeviceNotifyEmail = device.EffectiveEmail, CustomerEmail = null };
-            var queued = await notifier.TryQueueAsync(previousRecipient, changed, channels: null, ct, notifyEmail: updated.EffectiveEmail);
+            // Also when the device switched emails off: the last email says so, so that a silent switch-off is noticed.
+            var previousRecipient = updated.ToTarget() with
+            {
+                DeviceNotifyEmail = device.EffectiveEmail, CustomerEmail = null, NotificationsDisabled = false,
+            };
+            var newAddress = updated.EffectiveEmail ?? NotificationLanguages.NoRecipientText(previousRecipient.Language);
+            var queued = await notifier.TryQueueAsync(previousRecipient, changed, channels: null, ct, notifyEmail: newAddress);
 
             logger.LogWarning(
                 "Device {DeviceCode} changed its notification address; event {EventId} raised, previous recipient notified: {Notified}",
