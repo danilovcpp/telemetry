@@ -9,6 +9,7 @@ using DeviceTelemetry.Application.Mobile.Queries.GetCustomerDevices;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceLogs;
+using DeviceTelemetry.Application.Mobile.Queries.GetDeviceNotifications;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceState;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -119,6 +120,8 @@ public class MobileController : ControllerBase
     /// <param name="deviceId">Internal device id, not the device code.</param>
     /// <param name="limit">Page size, 1–100; default 20.</param>
     /// <param name="cursor">Opaque <c>nextCursor</c> from the previous page.</param>
+    /// <param name="excludeReports"><c>true</c>: leave out regular reports (100010).</param>
+    /// <param name="notified"><c>true</c>: only events for which an email was queued (see <c>notification.status</c>).</param>
     /// <response code="200">A page of events (possibly empty).</response>
     /// <response code="400">Invalid <c>limit</c> or <c>cursor</c> (<c>pagination.invalid_limit</c>, <c>pagination.invalid_cursor</c>).</response>
     /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
@@ -132,10 +135,38 @@ public class MobileController : ControllerBase
         int deviceId,
         [FromQuery, DefaultValue(GetDeviceEventsQuery.DefaultLimit)] int? limit,
         [FromQuery] string? cursor,
+        [FromQuery] bool? excludeReports,
+        [FromQuery] bool? notified,
         [FromServices] IQueryHandler<GetDeviceEventsQuery, PagedResult<DeviceEventDto>> handler)
     {
-        var query = new GetDeviceEventsQuery(deviceId, limit ?? GetDeviceEventsQuery.DefaultLimit, cursor);
+        var query = new GetDeviceEventsQuery(
+            deviceId, limit ?? GetDeviceEventsQuery.DefaultLimit, cursor, excludeReports ?? false, notified ?? false);
         var result = await handler.HandleAsync(query, HttpContext.RequestAborted);
+        return result.Match<IActionResult>(Ok, this.Problem);
+    }
+
+    /// <summary>Email notifications of a device.</summary>
+    /// <remarks>
+    /// Whether emails are sent for the device now, in which language, and which status codes send one. Templates are the
+    /// same for all customers (one per code and language); the device decides the language (device, else customer, else
+    /// English) and may switch emails off. The address is deliberately not exposed.
+    ///
+    ///     GET /api/mobile/devices/15/notifications
+    /// </remarks>
+    /// <param name="deviceId">Internal device id, not the device code.</param>
+    /// <response code="200">The notification settings in effect.</response>
+    /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
+    [HttpGet("devices/{deviceId}/notifications")]
+    [ProducesResponseType<DeviceNotificationsDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
+    public async Task<IActionResult> GetDeviceNotifications(
+        int deviceId,
+        [FromServices] IQueryHandler<GetDeviceNotificationsQuery, DeviceNotificationsDto> handler)
+    {
+        var result = await handler.HandleAsync(new GetDeviceNotificationsQuery(deviceId), HttpContext.RequestAborted);
         return result.Match<IActionResult>(Ok, this.Problem);
     }
 

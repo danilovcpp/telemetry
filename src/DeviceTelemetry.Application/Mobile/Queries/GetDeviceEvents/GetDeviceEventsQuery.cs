@@ -10,7 +10,14 @@ namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
 /// <param name="DeviceId">Internal device id (<c>Device.Id</c>), not the device code.</param>
 /// <param name="Limit">Page size, 1–<see cref="MaxLimit"/>.</param>
 /// <param name="Cursor">The <c>nextCursor</c> of the previous page; <c>null</c> for the first page.</param>
-public sealed record GetDeviceEventsQuery(int DeviceId, int Limit = GetDeviceEventsQuery.DefaultLimit, string? Cursor = null)
+/// <param name="ExcludeReports">Leave out regular reports (100010).</param>
+/// <param name="Notified">Only events for which an email was queued (whatever its delivery state).</param>
+public sealed record GetDeviceEventsQuery(
+    int DeviceId,
+    int Limit = GetDeviceEventsQuery.DefaultLimit,
+    string? Cursor = null,
+    bool ExcludeReports = false,
+    bool Notified = false)
     : IQuery<PagedResult<DeviceEventDto>>
 {
     public const int DefaultLimit = 20;
@@ -27,6 +34,7 @@ public sealed record GetDeviceEventsQuery(int DeviceId, int Limit = GetDeviceEve
 /// <param name="OccurredAtRejected">
 /// The device's time was implausible (in the future) and <paramref name="OccurredAtUtc"/> is the server receive time instead.
 /// </param>
+/// <param name="Notification">The email for this event; <c>null</c> for events stored before server 1.8.</param>
 public sealed record DeviceEventDto(
     Guid Id,
     int StatusCode,
@@ -35,4 +43,24 @@ public sealed record DeviceEventDto(
     [property: JsonConverter(typeof(RawJsonConverter))] string? Payload,
     string Source,
     IReadOnlyList<TelemetryChannel>? Channels,
-    bool OccurredAtRejected);
+    bool OccurredAtRejected,
+    EventNotificationDto? Notification);
+
+/// <summary>What happened to the email for one event. No address is ever exposed.</summary>
+/// <param name="Status">
+/// <c>queued</c> (waiting to be sent or retried), <c>sent</c> (accepted by the mail service; delivery to the mailbox is not
+/// known), <c>failed</c> (could not be sent), <c>disabled</c> (emails switched off on the device), <c>no_template</c> (this
+/// code sends no email), <c>no_address</c> (no address on the device or the customer).
+/// </param>
+/// <param name="SentAtUtc">When the mail service accepted it; only for <c>sent</c>.</param>
+/// <param name="Language">Language of the email (<c>en</c>, <c>ru</c>, <c>de</c>); <c>null</c> when none was queued.</param>
+/// <param name="Subject">Subject of the email as sent; <c>null</c> when none was queued.</param>
+public sealed record EventNotificationDto(string Status, DateTime? SentAtUtc, string? Language, string? Subject)
+{
+    public const string Queued = "queued";
+    public const string Sent = "sent";
+    public const string Failed = "failed";
+    public const string Disabled = "disabled";
+    public const string NoTemplate = "no_template";
+    public const string NoAddress = "no_address";
+}

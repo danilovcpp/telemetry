@@ -73,6 +73,8 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_OutboxMessages_Due")
                         .HasFilter("\"Status\" IN ('Pending', 'Processing')");
 
+                    b.HasIndex("TelemetryEventId");
+
                     b.ToTable("OutboxMessages", (string)null);
                 });
 
@@ -282,6 +284,18 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("MessageId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Notification")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("NotificationLanguage")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("NotificationSubject")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -333,6 +347,10 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeviceId", "StatusCode", "OccurredAtUtc", "Id")
                         .IsDescending(false, false, true, true);
+
+                    b.HasIndex(new[] { "DeviceId", "OccurredAtUtc", "Id" }, "IX_TelemetryEvents_DeviceId_OccurredAtUtc_Id_Notified")
+                        .IsDescending(false, true, true)
+                        .HasFilter("\"Notification\" = 'Queued'");
 
                     b.ToTable("TelemetryEvents", (string)null);
                 });

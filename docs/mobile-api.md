@@ -1,6 +1,6 @@
 # DeviceTelemetry — API для мобильного приложения
 
-Версия контракта: **1.4.0** (MVP). Задание для разработчика приложения — что строить и как — [mobile-app-integration.md](mobile-app-integration.md). Машиночитаемая спецификация: [`mobile-api.openapi.json`](mobile-api.openapi.json) (OpenAPI 3.1, подходит для генерации клиента, см. [раздел 13](#13-генерация-клиента)).
+Версия контракта: **1.5.0** (MVP). Задание для разработчика приложения — что строить и как — [mobile-app-integration.md](mobile-app-integration.md). Машиночитаемая спецификация: [`mobile-api.openapi.json`](mobile-api.openapi.json) (OpenAPI 3.1, подходит для генерации клиента, см. [раздел 13](#13-генерация-клиента)).
 
 API даёт экраны: список устройств клиента, карточку устройства, его текущее состояние, историю событий, а для приборов с Device Link — живые значения ([раздел 11](#11-живые-значения-websocket)) и сохранённые файлы данных ([раздел 12](#12-сохранённые-данные)). Все операции — только чтение.
 
@@ -280,7 +280,7 @@ GET /api/mobile/devices/1/state
 ## 8. История событий устройства
 
 ```http
-GET /api/mobile/devices/{deviceId}/events?limit={limit}&cursor={cursor}
+GET /api/mobile/devices/{deviceId}/events?limit={limit}&cursor={cursor}&excludeReports={true|false}&notified={true|false}
 ```
 
 События устройства, **новые сверху**: по `occurredAtUtc` по убыванию, при равном времени — по `id` по убыванию. История выдаётся страницами.
@@ -290,6 +290,10 @@ GET /api/mobile/devices/{deviceId}/events?limit={limit}&cursor={cursor}
 | `deviceId` | путь | integer | да | `id` устройства |
 | `limit` | query | integer | нет | размер страницы, 1–100, по умолчанию 20 |
 | `cursor` | query | string | нет | `nextCursor` из предыдущей страницы; для первой страницы не передаётся |
+| `excludeReports` | query | boolean | нет | `true` — без регулярных отчётов `100010` |
+| `notified` | query | boolean | нет | `true` — только события, по которым было отправлено письмо (`notification.status` — `queued`, `sent` или `failed`) |
+
+Фильтры можно сочетать. Курсор получайте и передавайте с теми же фильтрами, что и первую страницу: при смене фильтра начинайте с первой страницы.
 
 **Ответ `200 OK`:**
 
@@ -311,6 +315,24 @@ GET /api/mobile/devices/{deviceId}/events?limit={limit}&cursor={cursor}
 | `source` | string | `device` — прислал прибор; `server` — создал сам сервер (`190001` «не выходит на связь», `190002` «снова на связи») |
 | `channels` | массив `{id, name}` или `null` | каналы, к которым относится событие (например, `100003` «не отвечают каналы»); `name` может быть `null` |
 | `occurredAtRejected` | boolean | `true` — время прибора было неправдоподобным (в будущем), и `occurredAtUtc` — это время получения сервером |
+| `notification` | объект или `null` | что стало с письмом по этому событию, см. ниже; `null` у событий, сохранённых до версии 1.5.0 |
+
+**`notification`:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `status` | string | `queued` — письмо в очереди (или ждёт повтора); `sent` — почтовый сервис принял письмо; `failed` — отправить не удалось; `disabled` — письма выключены на приборе; `no_template` — по этому коду писем не бывает; `no_address` — нет адреса ни у прибора, ни у клиента |
+| `sentAtUtc` | string (date-time) или `null` | когда почтовый сервис принял письмо; только для `sent` |
+| `language` | string или `null` | язык письма (`en`, `ru`, `de`); `null`, если письма не было |
+| `subject` | string или `null` | тема письма в том виде, в каком оно ушло; `null`, если письма не было |
+
+- `sent` значит, что письмо принял почтовый сервис отправителя. Дошло ли оно до ящика, сервер не знает: например, если адрес не существует, отказ приходит позже и в API не отражается.
+- Тело письма и адрес получателя в API не отдаются: API пока без авторизации. Тело появится вместе с авторизацией.
+- Неизвестные значения `status` показывайте как «неизвестно».
+
+```json
+"notification": { "status": "sent", "sentAtUtc": "2026-10-27T09:00:04.21Z", "language": "ru", "subject": "Logger: проверка связи" }
+```
 
 ```http
 GET /api/mobile/devices/1/events?limit=2
@@ -326,7 +348,8 @@ GET /api/mobile/devices/1/events?limit=2
       "payload": { "t": "10:05:00Z", "v": 3.3 },
       "source": "device",
       "channels": null,
-      "occurredAtRejected": false
+      "occurredAtRejected": false,
+      "notification": { "status": "sent", "sentAtUtc": "2026-10-16T15:36:35.4Z", "language": "en", "subject": "Staging Sensor 001: status 200" }
     },
     {
       "id": "01a1455b-9485-758a-8877-2392d5e71be6",
@@ -336,7 +359,8 @@ GET /api/mobile/devices/1/events?limit=2
       "payload": null,
       "source": "server",
       "channels": null,
-      "occurredAtRejected": false
+      "occurredAtRejected": false,
+      "notification": { "status": "no_template", "sentAtUtc": null, "language": null, "subject": null }
     }
   ],
   "nextCursor": "CN8rbPBsbgABoUVblIV1ioh3I5LV5xvm",
@@ -367,6 +391,24 @@ GET /api/mobile/devices/1/events?limit=2
 - `limit` вне диапазона 1–100 даёт ошибку 400, сервер его не подрезает.
 - Получили `400 pagination.invalid_cursor` — сбросьте список и загрузите первую страницу.
 - Используйте `id` события как ключ элемента списка (diffing в SwiftUI, `DiffUtil` и т. п.).
+
+### Уведомления прибора
+
+```http
+GET /api/mobile/devices/{deviceId}/notifications
+```
+```json
+{ "enabled": true, "reason": null, "language": "ru", "codes": [100000, 100001, 100002, 100003, 100004, 100005, 100006, 100007, 100008, 190001, 190002, 190003] }
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `enabled` | boolean | письма по прибору сейчас уходят |
+| `reason` | string или `null` | почему нет: `disabled` — выключены на приборе, `no_address` — нет адреса ни у прибора, ни у клиента |
+| `language` | string | язык писем: язык прибора, иначе клиента, иначе `en` |
+| `codes` | массив integer | коды событий, по которым уходит письмо на этом языке, по возрастанию |
+
+Шаблоны писем общие для всех клиентов: по одному на код и язык. От прибора зависят только язык и то, выключены ли письма. Адрес получателя не отдаётся. **Ошибки:** `404 device.not_found`, `429`, `503`.
 
 ## 10. Данные событий
 
@@ -576,6 +618,7 @@ openapi-generator generate -i docs/mobile-api.openapi.json -g kotlin -o android/
 
 | Версия | Дата | Изменения |
 |---|---|---|
+| 1.5.0 | 2026-10-27 | `notification` в событиях истории; фильтры истории `excludeReports` и `notified`; `GET /devices/{id}/notifications`. Дополнения, существующие поля не менялись |
 | 1.4.0 | 2026-10-26 | `notificationsDisabled` в карточке устройства. Дополнение, существующие поля не менялись |
 | 1.3.0 | 2026-10-23 | `features` в карточке устройства; живые значения `GET /devices/{id}/live` (WebSocket); сохранённые данные `GET /devices/{id}/logs`, `GET`/`HEAD /devices/{id}/data/{path}`; коды `feature.not_available`, `log.not_found`, `logs.invalid_channel`, `logs.invalid_month`, `sync.pending`, `device.offline`. Дополнения, существующие поля не менялись |
 | 1.2.0 | 2026-10-19 | В карточке устройства — `offlineAfterS`, `monitoring`, `timeZone`, `channels`; код `190003`. Дополнения, существующие поля не менялись |

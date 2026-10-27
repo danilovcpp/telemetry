@@ -15,6 +15,9 @@ internal sealed class TelemetryEventConfiguration : IEntityTypeConfiguration<Tel
         builder.Property(e => e.Payload).HasColumnType("jsonb").Metadata.SetMaxLength(null); // size is limited by validation, not the column
         builder.Property(e => e.Channels).HasColumnType("jsonb").Metadata.SetMaxLength(null);
         builder.Property(e => e.Source).HasConversion<string>().HasMaxLength(10);
+        builder.Property(e => e.Notification).HasConversion<string>().HasMaxLength(16);
+        builder.Property(e => e.NotificationLanguage).HasMaxLength(Template.LanguageMaxLength);
+        builder.Property(e => e.NotificationSubject).HasMaxLength(Template.SubjectMaxLength);
         builder.Property(e => e.RejectedNotifyEmail).HasMaxLength(Device.NotifyEmailMaxLength);
         builder.Property(e => e.RejectedNotifyLanguage).HasMaxLength(16);
 
@@ -29,6 +32,12 @@ internal sealed class TelemetryEventConfiguration : IEntityTypeConfiguration<Tel
 
         // Latest event of one status for one device, e.g. the last regular report (100010) for the device state screen.
         builder.HasIndex(e => new { e.DeviceId, e.StatusCode, e.OccurredAtUtc, e.Id }).IsDescending(false, false, true, true);
+
+        // Mobile history filtered to events that sent an email (?notified=true): same order as the full history.
+        // A named index: an unnamed one on the same columns would replace the main history index above.
+        builder.HasIndex(e => new { e.DeviceId, e.OccurredAtUtc, e.Id }, "IX_TelemetryEvents_DeviceId_OccurredAtUtc_Id_Notified")
+            .IsDescending(false, true, true)
+            .HasFilter("\"Notification\" = 'Queued'");
 
         // Events of a given status across devices, e.g. "all errors in the last hour".
         builder.HasIndex(e => new { e.StatusCode, e.OccurredAtUtc }).IsDescending(false, true);

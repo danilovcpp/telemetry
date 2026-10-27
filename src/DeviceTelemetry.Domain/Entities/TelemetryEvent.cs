@@ -48,6 +48,36 @@ public class TelemetryEvent : BaseAuditableEntity
 
     /// <summary>A <c>reportIntervalS</c> the device sent outside the allowed range that was therefore ignored.</summary>
     public int? RejectedReportIntervalS { get; set; }
+
+    /// <summary>
+    /// What happened to the email for this event, decided when the event was stored. <c>null</c> on events stored before
+    /// outcomes were recorded (1.8). Delivery of a queued email is tracked by its outbox message.
+    /// </summary>
+    public NotificationOutcome? Notification { get; set; }
+
+    /// <summary>Language of the queued email's template (<c>null</c> for the neutral template or when nothing was queued).</summary>
+    public string? NotificationLanguage { get; set; }
+
+    /// <summary>Subject of the queued email; left empty when it would contain an email address (public mobile API).</summary>
+    public string? NotificationSubject { get; set; }
+}
+
+public enum NotificationOutcome
+{
+    /// <summary>An email was rendered and put into the outbox.</summary>
+    Queued,
+
+    /// <summary>The device switched emails off.</summary>
+    Disabled,
+
+    /// <summary>No active template for this status code and language: this code never sends emails.</summary>
+    NoTemplate,
+
+    /// <summary>Neither the device nor the customer has a valid address.</summary>
+    NoAddress,
+
+    /// <summary>The template could not be rendered (configuration error, logged).</summary>
+    Failed,
 }
 
 public enum TelemetryEventSource

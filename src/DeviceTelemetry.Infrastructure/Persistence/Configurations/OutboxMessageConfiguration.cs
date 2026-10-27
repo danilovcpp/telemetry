@@ -18,6 +18,9 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.Property(m => m.LockedBy).HasMaxLength(OutboxMessage.LockedByMaxLength);
         builder.Property(m => m.LastError).HasMaxLength(OutboxMessage.LastErrorMaxLength);
 
+        // Delivery state of an event's email (mobile history).
+        builder.HasIndex(m => m.TelemetryEventId);
+
         // Supports the worker's claim query; sent and failed rows are excluded so the index stays small.
         builder.HasIndex(m => m.NextAttemptAtUtc)
             .HasDatabaseName("IX_OutboxMessages_Due")

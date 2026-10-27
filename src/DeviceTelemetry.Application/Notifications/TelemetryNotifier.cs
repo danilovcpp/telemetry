@@ -63,12 +63,13 @@ public sealed class TelemetryNotifier(
                         && (t.Language == language || t.Language == NotificationLanguages.Default || t.Language == null))
             .ToListAsync(ct);
 
-        var template = candidates.FirstOrDefault(t => t.Language == language)
-                       ?? candidates.FirstOrDefault(t => t.Language == NotificationLanguages.Default)
-                       ?? candidates.FirstOrDefault(t => t.Language == null);
+        var template = SelectTemplate(candidates, language);
 
         if (template is null || !template.IsActive)
+        {
+            telemetryEvent.Notification = NotificationOutcome.NoTemplate;
             return false;
+        }
 
         if (template.Language != language)
         {
@@ -79,6 +80,7 @@ public sealed class TelemetryNotifier(
 
         if (target.NotificationsDisabled)
         {
+            telemetryEvent.Notification = NotificationOutcome.Disabled;
             logger.LogInformation(
                 "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: emails switched off on the device",
                 telemetryEvent.Id, telemetryEvent.StatusCode, target.DeviceCode);
@@ -88,6 +90,7 @@ public sealed class TelemetryNotifier(
         var recipient = target.DeviceNotifyEmail ?? target.CustomerEmail;
         if (string.IsNullOrWhiteSpace(recipient) || !MailAddress.TryCreate(recipient, out _))
         {
+            telemetryEvent.Notification = NotificationOutcome.NoAddress;
             logger.LogWarning(
                 "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: no valid recipient address",
                 telemetryEvent.Id, telemetryEvent.StatusCode, target.DeviceCode);
@@ -110,6 +113,7 @@ public sealed class TelemetryNotifier(
 
         if (rendered.IsFailure)
         {
+            telemetryEvent.Notification = NotificationOutcome.Failed;
             logger.LogError(
                 "Notification for event {EventId} (status {StatusCode}, device {DeviceCode}) skipped: {ErrorCode} {ErrorMessage}",
                 telemetryEvent.Id, telemetryEvent.StatusCode, target.DeviceCode, rendered.Error.Code, rendered.Error.Message);
@@ -120,7 +124,26 @@ public sealed class TelemetryNotifier(
         context.OutboxMessages.Add(OutboxMessage.ForEmail(
             Guid.CreateVersion7(timeProvider.GetUtcNow()), email, telemetryEvent.Id, telemetryEvent.ReceivedAtUtc));
 
+        telemetryEvent.Notification = NotificationOutcome.Queued;
+        telemetryEvent.NotificationLanguage = template.Language;
+        // The subject is shown in the public mobile API: never store one that carries an address.
+        var subject = rendered.Value.Subject;
+        telemetryEvent.NotificationSubject = subject.Contains('@') ? null
+            : subject.Length <= Template.SubjectMaxLength ? subject : subject[..Template.SubjectMaxLength];
+
         return true;
+    }
+
+    /// <summary>
+    /// The template that decides for <paramref name="language"/>: in that language, else in
+    /// <see cref="NotificationLanguages.Default"/>, else the neutral one. It decides even when inactive.
+    /// </summary>
+    public static Template? SelectTemplate(IEnumerable<Template> candidates, string language)
+    {
+        var list = candidates as IReadOnlyCollection<Template> ?? candidates.ToList();
+        return list.FirstOrDefault(t => t.Language == language)
+               ?? list.FirstOrDefault(t => t.Language == NotificationLanguages.Default)
+               ?? list.FirstOrDefault(t => t.Language == null);
     }
 
     /// <summary>Channels named in the event win; ids without a name get the name from the device's catalog.</summary>

@@ -61,6 +61,7 @@ X-Device-Key: dtk_...
 | `GET /api/mobile/customers/{customerId}/devices` | устройства клиента `[{id, deviceCode, name}]`, сортировка по `name`, затем по `id`; клиент без устройств — `[]` | 404 `customer.not_found` |
 | `GET /api/mobile/devices/{deviceId}` | `{id, deviceCode, name, customerId, lastEventAtUtc, lastStatusCode}` | 404 `device.not_found` |
 | `GET /api/mobile/devices/{deviceId}/events?limit=&cursor=` | страница `{items, nextCursor, hasMore}` | 400 `pagination.invalid_limit` / `pagination.invalid_cursor`, 404 `device.not_found` |
+| `GET /api/mobile/devices/{deviceId}/notifications` | `{enabled, reason, language, codes}` — уходят ли письма, на каком языке, по каким кодам | 404 `device.not_found` |
 | WebSocket `GET /api/mobile/devices/{deviceId}/live` | кадры `status` и `values` (живые значения через Device Link) | 404 `feature.not_available`, 429 |
 | `GET /api/mobile/devices/{deviceId}/logs?ch=&month=` | `{months}` или `{days:[{path,size,complete}]}` | 400 `logs.invalid_*`, 404 `feature.not_available` / `log.not_found` |
 | `GET`/`HEAD /api/mobile/devices/{deviceId}/data/{path}` | байты копии файла, `Range`/`ETag` | 404, 416, 503 `sync.pending` / `device.offline` |

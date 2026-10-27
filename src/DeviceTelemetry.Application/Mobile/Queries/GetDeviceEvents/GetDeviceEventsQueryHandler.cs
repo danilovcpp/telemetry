@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Outbox;
 using DeviceTelemetry.Application.Telemetry;
 using DeviceTelemetry.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,9 @@ namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
 /// <summary>
 /// Keyset pagination over (<c>OccurredAtUtc</c> DESC, <c>Id</c> DESC), served by the index
 /// <c>IX_TelemetryEvents_DeviceId_OccurredAtUtc_Id</c>. Unlike OFFSET, page cost does not grow with depth,
-/// and events with equal timestamps are neither skipped nor repeated because <c>Id</c> breaks ties.
+/// and events with equal timestamps are neither skipped nor repeated because <c>Id</c> breaks ties. <c>notified</c> uses the
+/// partial index of the same order; <c>excludeReports</c> filters along the main one. The email's delivery state comes from
+/// its outbox message by two scalar subqueries (index on <c>TelemetryEventId</c>).
 /// </summary>
 public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
     : IQueryHandler<GetDeviceEventsQuery, PagedResult<DeviceEventDto>>
@@ -33,6 +36,12 @@ public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
         var events = context.TelemetryEvents
             .AsNoTracking()
             .Where(e => e.DeviceId == query.DeviceId);
+
+        if (query.Notified)
+            events = events.Where(e => e.Notification == NotificationOutcome.Queued);
+
+        if (query.ExcludeReports)
+            events = events.Where(e => e.StatusCode != TelemetryStatusCodes.RegularReport);
 
         if (after is { } cursor)
         {
@@ -58,6 +67,19 @@ public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
                 IsServer = e.Source == TelemetryEventSource.Server,
                 e.Channels,
                 OccurredAtRejected = e.RejectedOccurredAtUtc != null,
+                e.Notification,
+                e.NotificationLanguage,
+                e.NotificationSubject,
+                OutboxStatus = context.OutboxMessages
+                    .Where(m => m.TelemetryEventId == e.Id)
+                    .OrderBy(m => m.Id)
+                    .Select(m => (OutboxMessageStatus?)m.Status)
+                    .FirstOrDefault(),
+                SentAtUtc = context.OutboxMessages
+                    .Where(m => m.TelemetryEventId == e.Id && m.Status == OutboxMessageStatus.Sent)
+                    .OrderBy(m => m.Id)
+                    .Select(m => m.ProcessedAtUtc)
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
 
@@ -71,7 +93,8 @@ public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
                 e.Payload,
                 e.IsServer ? "server" : "device",
                 e.Channels is null ? null : JsonSerializer.Deserialize<List<TelemetryChannel>>(e.Channels, SerializerOptions),
-                e.OccurredAtRejected))
+                e.OccurredAtRejected,
+                ToNotification(e.Notification, e.OutboxStatus, e.SentAtUtc, e.NotificationLanguage, e.NotificationSubject)))
             .ToList();
 
         // An empty page is ambiguous: no (more) events, or no such device. Only then is the device checked.
@@ -85,4 +108,21 @@ public sealed class GetDeviceEventsQueryHandler(IApplicationDbContext context)
         var nextCursor = hasMore ? new EventCursor(items[^1].OccurredAtUtc, items[^1].Id).Encode() : null;
         return new PagedResult<DeviceEventDto>(items, nextCursor, hasMore);
     }
+
+    private static EventNotificationDto? ToNotification(
+        NotificationOutcome? outcome, OutboxMessageStatus? delivery, DateTime? sentAtUtc, string? language, string? subject) =>
+        outcome switch
+        {
+            null => null,
+            NotificationOutcome.Queued => delivery switch
+            {
+                OutboxMessageStatus.Sent => new EventNotificationDto(EventNotificationDto.Sent, sentAtUtc, language, subject),
+                OutboxMessageStatus.Failed => new EventNotificationDto(EventNotificationDto.Failed, null, language, subject),
+                _ => new EventNotificationDto(EventNotificationDto.Queued, null, language, subject),
+            },
+            NotificationOutcome.Disabled => new EventNotificationDto(EventNotificationDto.Disabled, null, null, null),
+            NotificationOutcome.NoTemplate => new EventNotificationDto(EventNotificationDto.NoTemplate, null, null, null),
+            NotificationOutcome.NoAddress => new EventNotificationDto(EventNotificationDto.NoAddress, null, null, null),
+            _ => new EventNotificationDto(EventNotificationDto.Failed, null, null, null),
+        };
 }

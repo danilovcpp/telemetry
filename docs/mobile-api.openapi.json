@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "DeviceTelemetry Mobile API",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Read API for the DeviceTelemetry mobile app. Human-readable guide: docs/mobile-api.md.\n\n**Temporarily public (MVP):** no authentication. `customerId` and `deviceId` in the URL do not prove access rights. Authentication and owner checks will be added before a public production launch, which will change this contract.\n\nErrors are RFC 9457 problem details (`application/problem+json`) with a stable `code`; request validation errors (400) carry `errors` instead. Rate limit: 120 requests per minute per client IP, exceeded requests get 429 with `Retry-After`.\n\n**Live values** are a WebSocket, `GET /api/mobile/devices/{deviceId}/live`, which OpenAPI cannot describe: see docs/mobile-api.md (frames `status` and `values`). Offer it only when the device card's `features` contains `live`; `logs` and `data` need `history`. Live values and data files come from the devices over Device Link (`/api/device/v1/link`, not part of this API)."
   },
   "servers": [
@@ -274,6 +274,22 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "excludeReports",
+            "in": "query",
+            "description": "`true`: leave out regular reports (100010).",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "notified",
+            "in": "query",
+            "description": "`true`: only events for which an email was queued (see `notification.status`).",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -289,6 +305,79 @@
           },
           "400": {
             "description": "Invalid `limit` or `cursor` (`pagination.invalid_limit`, `pagination.invalid_cursor`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The device does not exist (`device.not_found`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/devices/{deviceId}/notifications": {
+      "get": {
+        "tags": [
+          "Mobile (temporarily public)"
+        ],
+        "summary": "Email notifications of a device.",
+        "description": "Whether emails are sent for the device now, in which language, and which status codes send one. Templates are the\r\nsame for all customers (one per code and language); the device decides the language (device, else customer, else\r\nEnglish) and may switch emails off. The address is deliberately not exposed.\r\n\r\n    GET /api/mobile/devices/15/notifications",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Internal device id, not the device code.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The notification settings in effect.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceNotificationsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -758,7 +847,8 @@
           "payload",
           "source",
           "channels",
-          "occurredAtRejected"
+          "occurredAtRejected",
+          "notification"
         ],
         "type": "object",
         "properties": {
@@ -800,6 +890,16 @@
           },
           "occurredAtRejected": {
             "type": "boolean"
+          },
+          "notification": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EventNotificationDto"
+              }
+            ]
           }
         }
       },
@@ -885,6 +985,36 @@
         },
         "description": "Exactly one of `months` (no `month` requested) and `days` is present."
       },
+      "DeviceNotificationsDto": {
+        "required": [
+          "enabled",
+          "reason",
+          "language",
+          "codes"
+        ],
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "language": {
+            "type": "string"
+          },
+          "codes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        }
+      },
       "DeviceReportDto": {
         "required": [
           "eventId",
@@ -959,6 +1089,39 @@
               {
                 "$ref": "#/components/schemas/DeviceReportDto"
               }
+            ]
+          }
+        }
+      },
+      "EventNotificationDto": {
+        "required": [
+          "status",
+          "sentAtUtc",
+          "language",
+          "subject"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "sentAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "language": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subject": {
+            "type": [
+              "null",
+              "string"
             ]
           }
         }

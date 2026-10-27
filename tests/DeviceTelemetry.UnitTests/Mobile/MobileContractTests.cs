@@ -35,13 +35,19 @@ public sealed class MobileContractTests
     [Fact]
     public void Device_event_exposes_only_event_data() =>
         Assert.Equal(
-            ["id", "statusCode", "occurredAtUtc", "receivedAtUtc", "payload", "source", "channels", "occurredAtRejected"],
-            JsonProperties(new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, null, "device", null, false)));
+            ["id", "statusCode", "occurredAtUtc", "receivedAtUtc", "payload", "source", "channels", "occurredAtRejected", "notification"],
+            JsonProperties(new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, null, "device", null, false, null)));
+
+    [Fact]
+    public void Event_notification_exposes_state_language_and_subject_but_no_address() =>
+        Assert.Equal(
+            ["status", "sentAtUtc", "language", "subject"],
+            JsonProperties(new EventNotificationDto("sent", DateTime.UtcNow, "en", "Boiler: test")));
 
     [Fact]
     public void Payload_round_trips_as_raw_json()
     {
-        var dto = new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, """{"a":[1,2],"b":{"c":null}}""", "device", null, false);
+        var dto = new DeviceEventDto(Guid.NewGuid(), 1, DateTime.UtcNow, DateTime.UtcNow, """{"a":[1,2],"b":{"c":null}}""", "device", null, false, null);
 
         var json = JsonSerializer.Serialize(dto, Web);
 

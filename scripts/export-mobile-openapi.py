@@ -12,7 +12,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-API_VERSION = "1.4.0"
+API_VERSION = "1.5.0"
 OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "mobile-api.openapi.json"
 
 DESCRIPTION = (
