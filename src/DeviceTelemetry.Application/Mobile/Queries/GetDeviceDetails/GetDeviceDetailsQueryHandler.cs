@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DeviceTelemetry.Application.Abstractions.Persistence;
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -45,7 +46,10 @@ public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context, 
                     d.TimeZone,
                     null,
                     null!,
-                    d.NotificationsDisabled),
+                    d.NotificationsDisabled,
+                    d.LifetimeAtUtc,
+                    null),
+                d.Lifetime,
                 d.Channels,
                 d.LinkHello,
                 HasCopies = d.LogFiles.Any(f => f.StoredSize > 0 && !f.Deleted),
@@ -62,6 +66,7 @@ public sealed class GetDeviceDetailsQueryHandler(IApplicationDbContext context, 
                 ? null
                 : JsonSerializer.Deserialize<List<TelemetryChannel>>(row.Channels, SerializerOptions),
             Features = MobileFeatures.For(featureOptions.Value, row.LinkHello, row.HasCopies),
+            Lifetime = DeviceLifetime.Parse(row.Lifetime),
         };
     }
 }

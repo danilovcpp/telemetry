@@ -67,6 +67,7 @@ public static class TestData
             new SendTelemetryCommandValidator(Options.Create(new TelemetryOptions())),
             CreateNotifier(db, time),
             CreateContactRecorder(db, time),
+            new DeviceLifetimeRecorder(db),
             Options.Create(new TelemetryOptions()),
             time,
             NullLogger<SendTelemetryCommandHandler>.Instance);

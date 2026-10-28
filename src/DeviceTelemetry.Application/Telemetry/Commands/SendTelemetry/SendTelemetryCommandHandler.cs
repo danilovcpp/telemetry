@@ -25,6 +25,7 @@ public sealed class SendTelemetryCommandHandler(
     IValidator<SendTelemetryCommand> validator,
     TelemetryNotifier notifier,
     DeviceContactRecorder contactRecorder,
+    DeviceLifetimeRecorder lifetimeRecorder,
     IOptions<TelemetryOptions> options,
     TimeProvider timeProvider,
     ILogger<SendTelemetryCommandHandler> logger)
@@ -106,6 +107,7 @@ public sealed class SendTelemetryCommandHandler(
             var updated = await contactRecorder.RecordAsync(device, settings, now, ct);
 
             context.TelemetryEvents.Add(telemetryEvent);
+            await lifetimeRecorder.RecordAsync(telemetryEvent, ct);
             var notificationQueued = await notifier.TryQueueAsync(updated.ToTarget(), telemetryEvent, command.Channels, ct);
 
             await context.SaveChangesAsync(ct);

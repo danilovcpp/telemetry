@@ -1,4 +1,5 @@
 using DeviceTelemetry.Application.Common;
+using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Telemetry;
 
 namespace DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
@@ -16,7 +17,9 @@ public sealed record GetDeviceDetailsQuery(int DeviceId) : IQuery<DeviceDetailsD
 /// (the channel names) are set by the device. The notification address is deliberately not exposed (public API).
 /// <see cref="Features"/> lists the optional screens the app may offer for the device (<c>live</c>, <c>history</c>); it is
 /// always present and may be empty. <see cref="NotificationsDisabled"/>: the device switched its email notifications off
-/// (show "emails switched off on the device"); the address itself is not exposed.
+/// (show "emails switched off on the device"); the address itself is not exposed. <see cref="Lifetime"/>: the device's
+/// latest lifetime counters, from the report of <see cref="LifetimeAtUtc"/> (device time); both <c>null</c> until a device
+/// with FW 3.43+ sends them.
 /// </summary>
 public sealed record DeviceDetailsDto(
     int Id,
@@ -33,4 +36,6 @@ public sealed record DeviceDetailsDto(
     string? TimeZone,
     IReadOnlyList<TelemetryChannel>? Channels,
     IReadOnlyList<string> Features,
-    bool NotificationsDisabled);
+    bool NotificationsDisabled,
+    DateTime? LifetimeAtUtc,
+    DeviceLifetime? Lifetime);

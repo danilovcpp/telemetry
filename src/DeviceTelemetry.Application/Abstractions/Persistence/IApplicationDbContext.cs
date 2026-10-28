@@ -13,6 +13,7 @@ public interface IApplicationDbContext
     DbSet<Template> Templates { get; }
     DbSet<OutboxMessage> OutboxMessages { get; }
     DbSet<DeviceLogFile> DeviceLogFiles { get; }
+    DbSet<DeviceLifetimeSnapshot> DeviceLifetimeSnapshots { get; }
 
     /// <summary>
     /// Saves all pending changes in a single database transaction.

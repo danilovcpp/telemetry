@@ -19,6 +19,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Template> Templates => Set<Template>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<DeviceLogFile> DeviceLogFiles => Set<DeviceLogFile>();
+    public DbSet<DeviceLifetimeSnapshot> DeviceLifetimeSnapshots => Set<DeviceLifetimeSnapshot>();
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken) =>
         Database.BeginTransactionAsync(cancellationToken);

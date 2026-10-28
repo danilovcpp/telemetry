@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddSingleton<EmailTemplateRenderer>();
         services.AddScoped<TelemetryNotifier>();
         services.AddScoped<DeviceContactRecorder>();
+        services.AddScoped<DeviceLifetimeRecorder>();
         services.TryAddSingleton(TimeProvider.System);
 
         return services;

@@ -8,6 +8,7 @@ using DeviceTelemetry.Application.Mobile;
 using DeviceTelemetry.Application.Mobile.Queries.GetCustomerDevices;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceEvents;
+using DeviceTelemetry.Application.Mobile.Queries.GetDeviceLifetime;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceLogs;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceNotifications;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceState;
@@ -141,6 +142,37 @@ public class MobileController : ControllerBase
     {
         var query = new GetDeviceEventsQuery(
             deviceId, limit ?? GetDeviceEventsQuery.DefaultLimit, cursor, excludeReports ?? false, notified ?? false);
+        var result = await handler.HandleAsync(query, HttpContext.RequestAborted);
+        return result.Match<IActionResult>(Ok, this.Problem);
+    }
+
+    /// <summary>History of the device's lifetime counters, newest first.</summary>
+    /// <remarks>
+    /// One point per report in which a counter other than the powered minutes changed (starts, resets by cause, clock
+    /// losses, firmware changes, first start, flash state), e.g. to show when watchdog resets happened. The latest counters,
+    /// including powered minutes, are in the device card (<c>lifetime</c>). Cursor pagination as for events.
+    ///
+    ///     GET /api/mobile/devices/15/lifetime?limit=20
+    /// </remarks>
+    /// <param name="deviceId">Internal device id, not the device code.</param>
+    /// <param name="limit">Page size, 1–100; default 20.</param>
+    /// <param name="cursor">Opaque <c>nextCursor</c> from the previous page.</param>
+    /// <response code="200">A page of points (empty until a device with FW 3.43+ reports counters).</response>
+    /// <response code="400">Invalid <c>limit</c> or <c>cursor</c> (<c>pagination.invalid_limit</c>, <c>pagination.invalid_cursor</c>).</response>
+    /// <response code="404">The device does not exist (<c>device.not_found</c>).</response>
+    [HttpGet("devices/{deviceId}/lifetime")]
+    [ProducesResponseType<PagedResult<DeviceLifetimePointDto>>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable, "application/problem+json")]
+    public async Task<IActionResult> GetDeviceLifetimeHistory(
+        int deviceId,
+        [FromQuery, DefaultValue(GetDeviceEventsQuery.DefaultLimit)] int? limit,
+        [FromQuery] string? cursor,
+        [FromServices] IQueryHandler<GetDeviceLifetimeHistoryQuery, PagedResult<DeviceLifetimePointDto>> handler)
+    {
+        var query = new GetDeviceLifetimeHistoryQuery(deviceId, limit ?? GetDeviceEventsQuery.DefaultLimit, cursor);
         var result = await handler.HandleAsync(query, HttpContext.RequestAborted);
         return result.Match<IActionResult>(Ok, this.Problem);
     }

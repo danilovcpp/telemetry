@@ -150,6 +150,12 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Lifetime")
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("LifetimeAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LinkHello")
                         .HasColumnType("jsonb");
 
@@ -206,6 +212,38 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_Devices_ApiKeyHash_Length", "\"ApiKeyHash\" IS NULL OR octet_length(\"ApiKeyHash\") = 32");
                         });
+                });
+
+            modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLifetimeSnapshot", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Lifetime")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId", "OccurredAtUtc", "EventId")
+                        .IsDescending(false, true, true);
+
+                    b.ToTable("DeviceLifetimeSnapshots", (string)null);
                 });
 
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLogFile", b =>
@@ -421,6 +459,17 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
                     b.Navigation("Customer");
                 });
 
+            modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLifetimeSnapshot", b =>
+                {
+                    b.HasOne("DeviceTelemetry.Domain.Entities.Device", "Device")
+                        .WithMany("LifetimeSnapshots")
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+                });
+
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.DeviceLogFile", b =>
                 {
                     b.HasOne("DeviceTelemetry.Domain.Entities.Device", "Device")
@@ -451,6 +500,8 @@ namespace DeviceTelemetry.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DeviceTelemetry.Domain.Entities.Device", b =>
                 {
                     b.Navigation("Events");
+
+                    b.Navigation("LifetimeSnapshots");
 
                     b.Navigation("LogFiles");
                 });

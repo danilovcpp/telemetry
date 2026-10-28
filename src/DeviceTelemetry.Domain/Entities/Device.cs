@@ -74,6 +74,17 @@ public class Device : BaseAuditableEntity
 
     public ICollection<DeviceLogFile> LogFiles { get; } = [];
 
+    /// <summary>
+    /// Latest lifetime counters the device reported (<c>payload.lifetime</c>, <c>jsonb</c> as sent), from the event with the
+    /// latest <c>OccurredAtUtc</c>; <c>null</c> if the device never sent them.
+    /// </summary>
+    public string? Lifetime { get; set; }
+
+    /// <summary><c>OccurredAtUtc</c> of the event <see cref="Lifetime"/> was taken from.</summary>
+    public DateTime? LifetimeAtUtc { get; set; }
+
+    public ICollection<DeviceLifetimeSnapshot> LifetimeSnapshots { get; } = [];
+
     public const int MinOfflineAfterS = 600;
     public const int MaxOfflineAfterS = 604_800;
     public const int TimeZoneMaxLength = 64;
