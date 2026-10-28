@@ -18,6 +18,7 @@ namespace DeviceTelemetry.Application.Devices;
 /// <param name="FwChanges">Firmware version changes.</param>
 /// <param name="FirstStartUtc">First start with a valid clock since FW 3.42; <c>null</c> if the clock was never set.</param>
 /// <param name="Stored"><c>false</c>: the device cannot write its flash, the counters will not survive a power loss.</param>
+/// <param name="Ack">Acknowledged alarm resets (FW 3.44); <c>null</c> on older firmware, where every reset counts as new.</param>
 public sealed record DeviceLifetime(
     long? PoweredMin,
     long? Starts,
@@ -25,7 +26,8 @@ public sealed record DeviceLifetime(
     long? ClockLost,
     long? FwChanges,
     DateTime? FirstStartUtc,
-    bool? Stored)
+    bool? Stored,
+    LifetimeAck? Ack)
 {
     /// <summary>Takes <c>lifetime</c> out of an event payload. <c>false</c> when there is none or it is not a JSON object.</summary>
     public static bool TryExtract(string? payload, out string lifetimeJson, out DeviceLifetime lifetime)
@@ -73,8 +75,9 @@ public sealed record DeviceLifetime(
     }
 
     /// <summary>
-    /// A counter other than <see cref="PoweredMin"/> differs: worth a history point. Powered minutes grow with every report
-    /// and would turn the history into a copy of the reports.
+    /// Anything but <see cref="PoweredMin"/> differs, the acknowledgement included (a new <see cref="LifetimeAck.AtUtc"/> with
+    /// the same numbers is a repeated acknowledgement): worth a history point. Powered minutes grow with every report and
+    /// would turn the history into a copy of the reports.
     /// </summary>
     public bool CountersDifferFrom(DeviceLifetime other) =>
         Starts != other.Starts
@@ -82,6 +85,7 @@ public sealed record DeviceLifetime(
         || FwChanges != other.FwChanges
         || FirstStartUtc != other.FirstStartUtc
         || Stored != other.Stored
+        || Ack != other.Ack
         || !SameResets(Resets, other.Resets);
 
     private static bool SameResets(IReadOnlyDictionary<string, long>? a, IReadOnlyDictionary<string, long>? b)
@@ -105,13 +109,9 @@ public sealed record DeviceLifetime(
             }
         }
 
-        DateTime? firstStart = null;
-        if (element.TryGetProperty("firstStartUtc", out var f) && f.ValueKind == JsonValueKind.String
-            && DateTime.TryParse(f.GetString(), CultureInfo.InvariantCulture,
-                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
-        {
-            firstStart = parsed;
-        }
+        LifetimeAck? ack = null;
+        if (element.TryGetProperty("ack", out var a) && a.ValueKind == JsonValueKind.Object)
+            ack = new LifetimeAck(Number(a, "watchdog"), Number(a, "supplyDrop"), UtcTime(a, "atUtc"));
 
         bool? stored = element.TryGetProperty("stored", out var s) && s.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? s.GetBoolean()
@@ -119,14 +119,30 @@ public sealed record DeviceLifetime(
 
         return new DeviceLifetime(
             Number(element, "poweredMin"), Number(element, "starts"), resets, Number(element, "clockLost"),
-            Number(element, "fwChanges"), firstStart, stored);
+            Number(element, "fwChanges"), UtcTime(element, "firstStartUtc"), stored, ack);
     }
+
+    private static DateTime? UtcTime(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+        && DateTime.TryParse(value.GetString(), CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed
+            : null;
 
     private static long? Number(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number)
             ? number
             : null;
 }
+
+/// <summary>
+/// Alarm resets acknowledged on the device (button, console or local API): the values of <c>resets.watchdog</c> and
+/// <c>resets.supplyDrop</c> up to which resets were looked at, not a number of acknowledgements. New resets are
+/// <c>max(0, resets.watchdog - Watchdog)</c>, the same for supply drops (an acknowledged value above the counter, e.g. after
+/// a board replacement, means none). Zeros and a <c>null</c> time until the first acknowledgement.
+/// </summary>
+/// <param name="AtUtc">When it was acknowledged; <c>null</c> if the device clock was not running then.</param>
+public sealed record LifetimeAck(long? Watchdog, long? SupplyDrop, DateTime? AtUtc);
 
 /// <summary>
 /// Keeps a device's latest lifetime counters and their history. Runs inside the telemetry transaction after

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using DeviceTelemetry.Application.Devices;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceDetails;
 using DeviceTelemetry.Application.Mobile.Queries.GetDeviceLifetime;
 using DeviceTelemetry.Application.Mobile;
@@ -35,7 +36,7 @@ public sealed class DeviceLifetimeTests(PostgresFixture postgres) : IAsyncLifeti
 
     private ApplicationDbContext NewContext() => PostgresFixture.CreateContext(_connectionString, _time);
 
-    private static string Payload(long poweredMin, long watchdog, int statusFw = 43, bool stored = true) => new JsonObject
+    private static string Payload(long poweredMin, long watchdog, int statusFw = 43, bool stored = true, JsonObject? ack = null) => new JsonObject
     {
         ["fw"] = $"FW 3.{statusFw}",
         ["lifetime"] = new JsonObject
@@ -50,6 +51,7 @@ public sealed class DeviceLifetimeTests(PostgresFixture postgres) : IAsyncLifeti
             ["fwChanges"] = 4,
             ["firstStartUtc"] = "2026-10-28T12:44:00Z",
             ["stored"] = stored,
+            ["ack"] = ack,
         },
         ["values"] = new JsonArray(),
     }.ToJsonString();
@@ -104,6 +106,33 @@ public sealed class DeviceLifetimeTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal([T0.AddMinutes(15), T0.AddMinutes(10), T0], history.Select(p => p.AtUtc));
         Assert.Equal([2L, 2L, 1L], history.Select(p => p.Lifetime.Resets!["watchdog"]));
         Assert.Equal(115, (await CardAsync()).Lifetime!.PoweredMin);
+    }
+
+    private static JsonObject Ack(long watchdog, string? atUtc) =>
+        new() { ["watchdog"] = watchdog, ["supplyDrop"] = 0, ["atUtc"] = atUtc };
+
+    [Fact]
+    public async Task The_acknowledgement_is_returned_and_each_new_one_is_a_history_point()
+    {
+        await SendAsync(Payload(100, 3, ack: Ack(0, null)), T0);                                // never acknowledged
+        await SendAsync(Payload(105, 3, ack: Ack(0, null)), T0.AddMinutes(5));                 // nothing new: no point
+        await SendAsync(Payload(110, 3, ack: Ack(3, "2026-10-28T08:07:00Z")), T0.AddMinutes(10)); // acknowledged: point
+        await SendAsync(Payload(115, 3, ack: Ack(3, "2026-10-28T08:12:00Z")), T0.AddMinutes(15)); // acknowledged again: point
+
+        var ack = (await CardAsync()).Lifetime!.Ack!;
+        Assert.Equal(new LifetimeAck(3, 0, new DateTime(2026, 10, 28, 8, 12, 0, DateTimeKind.Utc)), ack);
+
+        var history = await HistoryAsync();
+        Assert.Equal([T0.AddMinutes(15), T0.AddMinutes(10), T0], history.Select(p => p.AtUtc));
+        Assert.Null(history[^1].Lifetime.Ack!.AtUtc);
+    }
+
+    [Fact]
+    public async Task Firmware_without_acknowledgements_has_no_ack()
+    {
+        await SendAsync(Payload(100, 3), T0);
+
+        Assert.Null((await CardAsync()).Lifetime!.Ack);
     }
 
     [Fact]
